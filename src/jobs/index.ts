@@ -4,7 +4,7 @@ import { sendWeeklyDigest } from './weekly-digest.job';
 import { sendVerificationReminders } from './verification-reminder.job';
 import { refreshTrustScores } from './trust-score-refresh.job';
 import { runDailyFraudScan } from '../services/fraud.service';
-import { scheduleCleanup } from './cleanup.job';
+import { scheduleCleanup, cleanupIpRateLimits } from './cleanup.job';
 import { processMilestones } from './milestone.job';
 import { processDataRetention } from './data-retention.job';
 
@@ -49,6 +49,11 @@ export function registerJobs(): void {
   cron.schedule('0 6 * * *', async () => {
     try { await processMilestones(); } catch (err) { logger.error({ err }, 'milestone_job_error'); }
   }, { timezone: TZ });
+
+  // Hourly — purge ip_rate_limits rows older than 24 hours (§26 data retention)
+  cron.schedule('0 * * * *', async () => {
+    try { await cleanupIpRateLimits(); } catch (err) { logger.error({ err }, 'ip_rate_limit_cleanup_error'); }
+  });
 
   logger.info('background_jobs_registered');
 }

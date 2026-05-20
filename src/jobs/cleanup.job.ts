@@ -2,9 +2,10 @@ import cron from 'node-cron';
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 
-// Runs daily at 2 AM
+// ─── Daily cleanup (4 AM PT) ──────────────────────────────────────────────────
+
 export function scheduleCleanup(): ReturnType<typeof cron.schedule> {
-  return cron.schedule('0 2 * * *', async () => {
+  return cron.schedule('0 4 * * *', async () => {
     logger.info('cleanup_job_started');
     try {
       const now = new Date().toISOString();
@@ -13,8 +14,8 @@ export function scheduleCleanup(): ReturnType<typeof cron.schedule> {
       const { data: deleted } = await supabaseAdmin
         .from('users')
         .select('id')
-        .not('scheduled_deletion_at', 'is', null)
-        .lte('scheduled_deletion_at', now);
+        .not('deletion_scheduled_for', 'is', null)
+        .lte('deletion_scheduled_for', now);
 
       if (deleted?.length) {
         for (const user of deleted) {
@@ -24,12 +25,11 @@ export function scheduleCleanup(): ReturnType<typeof cron.schedule> {
         }
       }
 
-      // Purge rate_limit rows older than 7 days
+      // Purge per-user rate_limit rows older than 7 days
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split('T')[0];
       await supabaseAdmin.from('rate_limits').delete().lt('date', sevenDaysAgo);
-      await supabaseAdmin.from('ip_rate_limits').delete().lt('window_start', sevenDaysAgo);
 
       // Purge notifications older than 90 days
       const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
@@ -40,4 +40,17 @@ export function scheduleCleanup(): ReturnType<typeof cron.schedule> {
       logger.error({ err }, 'cleanup_job_failed');
     }
   });
+}
+
+// ─── Hourly ip_rate_limits cleanup ────────────────────────────────────────────
+// §26 data retention: IP rate limit rows kept for 24 hours only.
+// Called directly by registerJobs() on an hourly cron.
+
+export async function cleanupIpRateLimits(): Promise<void> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  await supabaseAdmin
+    .from('ip_rate_limits')
+    .delete()
+    .lt('window_start', cutoff);
+  logger.debug({ cutoff }, 'ip_rate_limits_cleaned');
 }
