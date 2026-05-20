@@ -41,8 +41,14 @@ app.use(requestId);
 // Routes
 import healthRouter from './routes/health.routes';
 import authRouter from './routes/auth.routes';
+import usersRouter from './routes/users.routes';
+import orgsRouter from './routes/organizations.routes';
+import sessionsRouter from './routes/sessions.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
+app.use('/', usersRouter);
+app.use('/', orgsRouter);
+app.use('/', sessionsRouter);
 
 // 404 & error handling
 app.use(notFound);
