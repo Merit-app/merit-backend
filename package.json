@@ -24,6 +24,8 @@
     "@sentry/node": "^10.53.1",
     "@sentry/profiling-node": "^10.53.1",
     "@supabase/supabase-js": "^2.106.0",
+    "@zxcvbn-ts/core": "^3.0.4",
+    "@zxcvbn-ts/language-common": "^3.0.4",
     "bullmq": "^5.76.10",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -42,8 +44,7 @@
     "stripe": "^22.1.1",
     "twilio": "^6.0.2",
     "undici": "^8.3.0",
-    "zod": "^4.4.3",
-    "zxcvbn-ts": "^2.2.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

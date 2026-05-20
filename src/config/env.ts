@@ -8,6 +8,8 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_JWT_SECRET: z.string().optional(),
+  SUPABASE_PROJECT_ID: z.string().optional(),
 
   // Auth
   MAGIC_LINK_SECRET: z.string().optional(),
@@ -17,21 +19,29 @@ const envSchema = z.object({
   // Twilio
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_PHONE_NUMBER: z.string().optional(),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
+  TWILIO_WEBHOOK_AUTH_TOKEN: z.string().optional(),
 
   // Resend
   RESEND_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().optional(),
+  RESEND_FROM_NAME: z.string().optional(),
+  RESEND_REPLY_TO: z.string().optional(),
 
   // Stripe
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  STRIPE_PRO_PRICE_ID: z.string().optional(),
-  STRIPE_PREMIUM_PRICE_ID: z.string().optional(),
-  STRIPE_INSTITUTIONAL_PRICE_ID: z.string().optional(),
+  STRIPE_PRICE_PRO_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PRO_YEARLY: z.string().optional(),
+  STRIPE_PRICE_PREMIUM_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PREMIUM_YEARLY: z.string().optional(),
+  STRIPE_PRICE_INSTITUTIONAL: z.string().optional(),
+  STRIPE_TAX_ENABLED: z.coerce.boolean().default(false),
 
   // Sentry
   SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0.1),
 
   // PostHog
   POSTHOG_API_KEY: z.string().optional(),
@@ -51,6 +61,10 @@ const envSchema = z.object({
   // App
   FRONTEND_URL: z.string().url().optional(),
   APP_NAME: z.string().default('Merit'),
+  API_BASE_URL: z.string().url().optional(),
+
+  // External APIs
+  PROPUBLICA_API_BASE: z.string().url().optional(),
 });
 
 const prodRequiredKeys: (keyof z.infer<typeof envSchema>)[] = [

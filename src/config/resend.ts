@@ -2,7 +2,7 @@ import { env } from './env';
 
 const mockResend = {
   emails: {
-    send: async (params: { from: string; to: string | string[]; subject: string; html?: string; react?: any }) => {
+    send: async (params: { from?: string; to: string | string[]; subject: string; html?: string; react?: any }) => {
       console.log(`[MOCK_EMAIL] to=${JSON.stringify(params.to)} subject="${params.subject}"`);
       return { data: { id: 'mock_email_' + Date.now() }, error: null };
     },
