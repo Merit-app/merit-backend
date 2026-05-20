@@ -23,7 +23,7 @@ export function VerificationReceipt({
   orgName,
   tier,
   sessionUrl,
-}: VerificationConfirmedEmailProps) {
+}: VerificationReceiptProps) {
   const b = badge[tier] ?? badge.verified_basic;
 
   return (

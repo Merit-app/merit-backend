@@ -37,9 +37,15 @@ vi.mock('../src/config/supabase', () => {
         single: () => Promise.resolve({ data: { id: 'new-session', ...resolveWith() }, error: null }),
       }),
     }));
-    chain.update = vi.fn(() => ({
-      eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: resolveWith(), error: null }) }) }),
-    }));
+    // update().eq().eq()... chains then is awaitable
+    const makeUpdateChain = () => {
+      const uc: any = {};
+      uc.eq = vi.fn(() => uc);
+      uc.select = vi.fn(() => ({ single: () => Promise.resolve({ data: resolveWith(), error: null }) }));
+      uc.then = (resolve: any) => Promise.resolve({ data: null, error: null }).then(resolve);
+      return uc;
+    };
+    chain.update = vi.fn(() => makeUpdateChain());
     chain.delete = vi.fn(() => ({ eq: () => Promise.resolve({ data: null, error: null }) }));
     chain.then = (resolve: any) =>
       Promise.resolve({ data: resolveWith(), error: null, count: 1 }).then(resolve);
@@ -157,7 +163,7 @@ describe('sessions.service — createSession', () => {
 describe('sessions.service — deleteSession (soft delete)', () => {
   it('soft-deletes a session the user owns', async () => {
     mockSession = { id: 'session-1', user_id: 'user-1', status: 'pending', deleted_at: null };
-    await expect(deleteSession('session-1', 'user-1')).resolves.toBeUndefined();
+    await expect(deleteSession('session-1', 'user-1')).resolves.toMatchObject({ deleted: true });
   });
 
   it('throws NotFoundError for a session that does not exist', async () => {
