@@ -209,8 +209,8 @@ router.post(
 
 // ─── Grant report ─────────────────────────────────────────────────────────
 
-// GET /admin/grant-report?from=2024-01-01&to=2024-12-31
-router.get('/admin/grant-report', async (req: Request, res: Response, next: NextFunction) => {
+// GET /admin/reports/grant?from=2024-01-01&to=2024-12-31
+router.get('/admin/reports/grant', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const query = z
       .object({

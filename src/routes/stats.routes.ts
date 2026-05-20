@@ -50,6 +50,17 @@ router.get('/stats/by-org', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// GET /stats/by-month?year=YYYY
+router.get('/stats/by-month', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const year = z.coerce.number().int().min(2000).max(2100).default(new Date().getFullYear()).parse(req.query.year);
+    const data = await statsService.getByMonthStats(req.user!.id, year);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /stats/goal
 router.get('/stats/goal', async (req: Request, res: Response, next: NextFunction) => {
   try {

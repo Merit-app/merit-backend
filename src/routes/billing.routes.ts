@@ -15,9 +15,9 @@ const checkoutSchema = z.object({
   cancelUrl: z.string().url().optional(),
 });
 
-// POST /billing/checkout
+// POST /billing/create-checkout
 router.post(
-  '/billing/checkout',
+  '/billing/create-checkout',
   validate(checkoutSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -34,8 +34,8 @@ router.post(
   },
 );
 
-// POST /billing/portal
-router.post('/billing/portal', async (req: Request, res: Response, next: NextFunction) => {
+// POST /billing/create-portal
+router.post('/billing/create-portal', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await billingService.createPortalSession(req.user!.id, req.body?.returnUrl);
     res.json(success(result));

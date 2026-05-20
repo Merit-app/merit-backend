@@ -154,6 +154,39 @@ export async function getMonthlyStats(userId: string, months = 12) {
   return result;
 }
 
+// ─── By-month for a specific year ────────────────────────────────────────
+
+export async function getByMonthStats(userId: string, year: number) {
+  const fromStr = `${year}-01-01`;
+  const toStr = `${year}-12-31`;
+
+  const { data: sessions } = await supabaseAdmin
+    .from('sessions')
+    .select('date, hours, status')
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .gte('date', fromStr)
+    .lte('date', toStr)
+    .order('date', { ascending: true });
+
+  const buckets: Record<string, { month: string; hours: number; verifiedHours: number; count: number }> = {};
+
+  for (const s of (sessions as SessionRow[] | null) ?? []) {
+    const month = s.date.slice(0, 7); // YYYY-MM
+    if (!buckets[month]) buckets[month] = { month, hours: 0, verifiedHours: 0, count: 0 };
+    buckets[month].hours += Number(s.hours);
+    buckets[month].count += 1;
+    if (s.status === 'verified') buckets[month].verifiedHours += Number(s.hours);
+  }
+
+  const result = [];
+  for (let m = 1; m <= 12; m++) {
+    const month = `${year}-${String(m).padStart(2, '0')}`;
+    result.push(buckets[month] ?? { month, hours: 0, verifiedHours: 0, count: 0 });
+  }
+  return result;
+}
+
 // ─── Goal progress ────────────────────────────────────────────────────────
 
 export async function getGoalProgress(userId: string) {

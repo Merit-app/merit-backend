@@ -13,22 +13,18 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
       logger.warn({ err, requestId: req.id }, err.message);
     }
     return res.status(err.statusCode).json({
-      error: {
-        code: err.code,
-        message: err.message,
-        ...(err.details ? { details: err.details } : {}),
-      },
+      error: err.code,
+      message: err.message,
+      ...(err.details ? { details: err.details } : {}),
     });
   }
 
   if (err instanceof ZodError) {
     logger.warn({ err, requestId: req.id }, 'Validation error');
     return res.status(400).json({
-      error: {
-        code: 'validation_failed',
-        message: 'Input validation failed',
-        details: err.flatten().fieldErrors,
-      },
+      error: 'validation_failed',
+      message: 'Input validation failed',
+      details: err.flatten().fieldErrors,
     });
   }
 
@@ -36,9 +32,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
   captureException(err, { requestId: req.id, path: req.path });
   logger.error({ err, requestId: req.id }, 'Unhandled error');
   return res.status(500).json({
-    error: {
-      code: 'internal_error',
-      message: 'An unexpected error occurred',
-    },
+    error: 'internal_error',
+    message: 'An unexpected error occurred',
   });
 }

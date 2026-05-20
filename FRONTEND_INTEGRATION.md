@@ -23,7 +23,7 @@ Get the token from `supabase.auth.getSession()` and attach it to every request.
 
 **Success:** `{ data: <payload> }`  
 **Paginated:** `{ data: [...], meta: { total, page, perPage, hasMore } }`  
-**Error:** `{ error: { code, message, details? } }`
+**Error:** `{ error: "error_code", message: "...", details?: {} }`
 
 ## Realtime notifications
 
@@ -54,20 +54,20 @@ supabase
 | Create session | POST | `/sessions` |
 | Session stats | GET | `/stats/dashboard` |
 | Weekly chart | GET | `/stats/weekly?weeks=12` |
-| Monthly chart | GET | `/stats/monthly?months=12` |
+| Monthly chart | GET | `/stats/by-month?year=YYYY` |
 | Notifications | GET | `/notifications` |
 | Unread count | GET | `/notifications/unread-count` |
-| Billing checkout | POST | `/billing/checkout` |
-| Billing portal | POST | `/billing/portal` |
-| Export PDF | GET | `/exports/sessions/pdf` |
+| Billing checkout | POST | `/billing/create-checkout` |
+| Billing portal | POST | `/billing/create-portal` |
+| Export PDF | POST | `/exports/pdf` |
 | Verify hours (magic link) | GET | `/magic/verify?token=...&response=YES` |
 | Admin chapter | GET | `/admin/chapter` |
-| Grant report | GET | `/admin/grant-report` |
+| Grant report | GET | `/admin/reports/grant` |
 
 ## Stripe checkout flow
 
 ```ts
-const { data } = await api.post('/billing/checkout', { priceId: 'price_pro_monthly' });
+const { data } = await api.post('/billing/create-checkout', { priceId: 'price_pro_monthly' });
 window.location.href = data.url; // redirect to Stripe
 ```
 

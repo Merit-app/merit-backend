@@ -9,9 +9,9 @@ const router = Router();
 
 router.use('/exports', requireAuth);
 
-// GET /exports/sessions/pdf  — plan-gated to pro+
-router.get(
-  '/exports/sessions/pdf',
+// POST /exports/pdf  — plan-gated to pro+
+router.post(
+  '/exports/pdf',
   requireFeature('export_pdf'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
