@@ -1,0 +1,229 @@
+import { Router, Request, Response, NextFunction } from 'express';
+import { requireAuth } from '../middleware/auth.middleware';
+import { validate } from '../middleware/validate.middleware';
+import { z } from 'zod';
+import * as adminService from '../services/admin.service';
+import { success } from '../utils/shape';
+
+const router = Router();
+
+router.use('/admin', requireAuth);
+
+// ─── Chapter ──────────────────────────────────────────────────────────────
+
+// GET /admin/chapter
+router.get('/admin/chapter', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getChapter(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /admin/chapter
+const updateChapterSchema = z.object({
+  name: z.string().min(1).optional(),
+  contactEmail: z.string().email().optional(),
+  contactPhone: z.string().optional(),
+  addressLine: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  postalCode: z.string().optional(),
+  logoUrl: z.string().url().optional(),
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  verifiedEmailDomain: z.string().optional(),
+});
+
+router.patch(
+  '/admin/chapter',
+  validate(updateChapterSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.updateChapter(req.user!.id, req.body);
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Members ──────────────────────────────────────────────────────────────
+
+// GET /admin/members
+router.get('/admin/members', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getMembers(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /admin/members/:memberId
+router.delete(
+  '/admin/members/:memberId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.removeMember(req.user!.id, req.params.memberId as string);
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Coordinators ─────────────────────────────────────────────────────────
+
+// GET /admin/coordinators
+router.get('/admin/coordinators', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getCoordinators(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /admin/coordinators/:userId
+router.delete(
+  '/admin/coordinators/:userId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.removeCoordinator(
+        req.user!.id,
+        req.params.userId as string,
+      );
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Whitelist ────────────────────────────────────────────────────────────
+
+// GET /admin/whitelist
+router.get('/admin/whitelist', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getWhitelist(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+const whitelistEntrySchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  orgId: z.string().uuid().optional(),
+});
+
+// POST /admin/whitelist
+router.post(
+  '/admin/whitelist',
+  validate(whitelistEntrySchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.addToWhitelist(req.user!.id, req.body);
+      res.status(201).json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// DELETE /admin/whitelist/:entryId
+router.delete(
+  '/admin/whitelist/:entryId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.removeFromWhitelist(
+        req.user!.id,
+        req.params.entryId as string,
+      );
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Invites ──────────────────────────────────────────────────────────────
+
+// GET /admin/invites
+router.get('/admin/invites', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getInvites(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+const inviteSchema = z.object({ email: z.string().email() });
+
+// POST /admin/invites
+router.post(
+  '/admin/invites',
+  validate(inviteSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.createInvite(req.user!.id, req.body.email);
+      res.status(201).json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// DELETE /admin/invites/:inviteId
+router.delete(
+  '/admin/invites/:inviteId',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.revokeInvite(req.user!.id, req.params.inviteId as string);
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /admin/invites/accept
+const acceptInviteSchema = z.object({ token: z.string().min(1) });
+
+router.post(
+  '/admin/invites/accept',
+  validate(acceptInviteSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.acceptInvite(req.body.token, req.user!.id);
+      res.json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Grant report ─────────────────────────────────────────────────────────
+
+// GET /admin/grant-report?from=2024-01-01&to=2024-12-31
+router.get('/admin/grant-report', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const query = z
+      .object({
+        from: z.string().date().optional(),
+        to: z.string().date().optional(),
+      })
+      .parse(req.query);
+
+    const data = await adminService.getGrantReport(req.user!.id, query);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
