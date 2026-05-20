@@ -37,7 +37,7 @@ router.post(
   validate(createSessionSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const session = await sessionsService.createSession(req.user!.id, req.body, req.user!.plan);
+      const session = await sessionsService.createSession(req.user!.id, req.body, req.user!.plan, req.user!.name);
       res.status(201).json(success({ session }));
     } catch (err) {
       next(err);

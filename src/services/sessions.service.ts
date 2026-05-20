@@ -6,6 +6,7 @@ import { resolveOrCreateAuthenticator } from './trust.service';
 import { calculateFraudScore } from './fraud.service';
 import { resolveOrCreateOrg } from './organizations.service';
 import { trackEvent } from './analytics.service';
+import { smsQueue } from '../queues/index';
 import type { CreateSessionInput, UpdateSessionInput } from '../schemas/sessions.schema';
 
 const RESEND_LIMITS: Record<string, number> = { free: 2, pro: 5, premium: 999, institutional: 999 };
@@ -61,7 +62,7 @@ export async function getSession(sessionId: string, userId: string) {
   return data;
 }
 
-export async function createSession(userId: string, input: CreateSessionInput, userPlan: string) {
+export async function createSession(userId: string, input: CreateSessionInput, userPlan: string, userName = 'Student') {
   // 1. Normalize contact info
   let supervisorPhone: string | undefined;
   if (input.supervisorPhone) {
@@ -117,13 +118,15 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     throw new AppError('create_failed', 'Failed to create session.', 500);
   }
 
-  // 6. Queue verifications (stubbed — queues wired in Step 17)
+  // 6. Queue verifications
   if (fraudScore < 0.9) {
-    if (supervisorPhone) {
+    const userForQueue = { id: userId, name: userName, plan: userPlan };
+    if (supervisorPhone && smsQueue) {
+      await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForQueue });
       logger.info({ sessionId: session.id, phone: supervisorPhone }, 'sms_verification_queued');
-      // emailQueue / smsQueue wired in Step 17
     }
-    if (supervisorEmail) {
+    if (supervisorEmail && smsQueue) {
+      await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForQueue });
       logger.info({ sessionId: session.id, email: supervisorEmail }, 'email_verification_queued');
     }
   } else {
