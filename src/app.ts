@@ -48,6 +48,7 @@ import verificationsRouter from './routes/verifications.routes';
 import magicLinkRouter from './routes/magic-link.routes';
 import webhooksRouter from './routes/webhooks.routes';
 import statsRouter from './routes/stats.routes';
+import notificationsRouter from './routes/notifications.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -57,6 +58,7 @@ app.use('/', verificationsRouter);
 app.use('/', magicLinkRouter);
 app.use('/', webhooksRouter);
 app.use('/', statsRouter);
+app.use('/', notificationsRouter);
 
 // 404 & error handling
 app.use(notFound);
