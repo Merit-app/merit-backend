@@ -3,14 +3,14 @@ import * as React from 'react';
 import { resendClient, RESEND_MODE } from '../config/resend';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
-import { WelcomeEmail } from '../templates/emails/welcome';
+import { WelcomeEmail } from '../templates/emails/confirm-email';
 import { PasswordResetEmail } from '../templates/emails/password-reset';
 import { ParentalConsentEmail } from '../templates/emails/parental-consent';
-import { AccountDeletionEmail } from '../templates/emails/account-deletion';
+import { AccountDeletionEmail } from '../templates/emails/account-deleted';
 import { VerificationRequestEmail } from '../templates/emails/verification-request';
-import { VerificationConfirmedEmail } from '../templates/emails/verification-confirmed';
+import { VerificationConfirmedEmail } from '../templates/emails/verification-receipt';
 import { VerificationDisputedEmail } from '../templates/emails/verification-disputed';
-import { MagicLinkEmail } from '../templates/emails/magic-link';
+import { MagicLinkEmail } from '../templates/emails/supervisor-magic-link';
 
 interface SendEmailOpts {
   to: string | string[];

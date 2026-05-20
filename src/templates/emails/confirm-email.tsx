@@ -2,12 +2,12 @@ import * as React from 'react';
 import { Link, Section, Text } from '@react-email/components';
 import { BaseLayout, styles } from './base';
 
-interface WelcomeEmailProps {
+interface ConfirmEmailProps {
   name: string;
   confirmationUrl: string;
 }
 
-export function WelcomeEmail({ name, confirmationUrl }: WelcomeEmailProps) {
+export function ConfirmEmail({ name, confirmationUrl }: ConfirmEmailProps) {
   return (
     <BaseLayout preview="Confirm your Merit account">
       <Text style={styles.h1}>Welcome to Merit, {name}!</Text>
@@ -29,4 +29,6 @@ export function WelcomeEmail({ name, confirmationUrl }: WelcomeEmailProps) {
   );
 }
 
-export default WelcomeEmail;
+// Backward-compat alias — resend.service.ts references WelcomeEmail
+export { ConfirmEmail as WelcomeEmail };
+export default ConfirmEmail;

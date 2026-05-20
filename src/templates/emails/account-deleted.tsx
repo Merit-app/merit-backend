@@ -2,13 +2,13 @@ import * as React from 'react';
 import { Link, Section, Text } from '@react-email/components';
 import { BaseLayout, styles } from './base';
 
-interface AccountDeletionEmailProps {
+interface AccountDeletedProps {
   name: string;
   deletionDate: string;
   cancelUrl: string;
 }
 
-export function AccountDeletionEmail({ name, deletionDate, cancelUrl }: AccountDeletionEmailProps) {
+export function AccountDeleted({ name, deletionDate, cancelUrl }: AccountDeletedProps) {
   return (
     <BaseLayout preview="Your Merit account is scheduled for deletion">
       <Text style={styles.h1}>Account deletion scheduled</Text>
@@ -33,4 +33,6 @@ export function AccountDeletionEmail({ name, deletionDate, cancelUrl }: AccountD
   );
 }
 
-export default AccountDeletionEmail;
+// Backward-compat alias
+export { AccountDeleted as AccountDeletionEmail };
+export default AccountDeleted;

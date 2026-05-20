@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Link, Section, Text } from '@react-email/components';
 import { BaseLayout, styles } from './base';
 
-interface VerificationConfirmedEmailProps {
+interface VerificationReceiptProps {
   studentName: string;
   supervisorName: string;
   hours: number;
@@ -16,7 +16,7 @@ const badge: Record<string, { label: string; color: string }> = {
   verified_basic: { label: 'Verified', color: '#2563eb' },
 };
 
-export function VerificationConfirmedEmail({
+export function VerificationReceipt({
   studentName,
   supervisorName,
   hours,
@@ -57,4 +57,6 @@ export function VerificationConfirmedEmail({
   );
 }
 
-export default VerificationConfirmedEmail;
+// Backward-compat alias
+export { VerificationReceipt as VerificationConfirmedEmail };
+export default VerificationReceipt;

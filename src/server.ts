@@ -4,7 +4,7 @@ import { env } from './config/env';
 import { initSentry } from './config/sentry';
 import { logger } from './lib/logger';
 import { redis } from './config/redis';
-import { startJobs } from './jobs/index';
+import { registerJobs } from './jobs/index';
 
 initSentry();
 
@@ -26,7 +26,7 @@ async function start() {
   }
 
   // Start cron jobs
-  startJobs();
+  registerJobs();
 
   server.listen(env.PORT, () => {
     logger.info(`merit-backend listening on http://localhost:${env.PORT} [${env.NODE_ENV}]`);

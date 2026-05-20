@@ -2,13 +2,13 @@ import * as React from 'react';
 import { Link, Section, Text } from '@react-email/components';
 import { BaseLayout, styles } from './base';
 
-interface MagicLinkEmailProps {
+interface SupervisorMagicLinkProps {
   supervisorEmail: string;
   pendingCount: number;
   dashUrl: string;
 }
 
-export function MagicLinkEmail({ pendingCount, dashUrl }: MagicLinkEmailProps) {
+export function SupervisorMagicLink({ pendingCount, dashUrl }: SupervisorMagicLinkProps) {
   return (
     <BaseLayout preview={`You have ${pendingCount} verification${pendingCount !== 1 ? 's' : ''} waiting`}>
       <Text style={styles.h1}>Your Merit supervisor dashboard</Text>
@@ -30,4 +30,6 @@ export function MagicLinkEmail({ pendingCount, dashUrl }: MagicLinkEmailProps) {
   );
 }
 
-export default MagicLinkEmail;
+// Backward-compat alias
+export { SupervisorMagicLink as MagicLinkEmail };
+export default SupervisorMagicLink;
