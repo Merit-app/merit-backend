@@ -44,11 +44,17 @@ import authRouter from './routes/auth.routes';
 import usersRouter from './routes/users.routes';
 import orgsRouter from './routes/organizations.routes';
 import sessionsRouter from './routes/sessions.routes';
+import verificationsRouter from './routes/verifications.routes';
+import magicLinkRouter from './routes/magic-link.routes';
+import webhooksRouter from './routes/webhooks.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
 app.use('/', orgsRouter);
 app.use('/', sessionsRouter);
+app.use('/', verificationsRouter);
+app.use('/', magicLinkRouter);
+app.use('/', webhooksRouter);
 
 // 404 & error handling
 app.use(notFound);
