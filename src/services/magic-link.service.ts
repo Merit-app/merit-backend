@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '../config/supabase';
 import { AppError } from '../lib/errors';
 import { generateUrlSafeToken } from '../lib/crypto';
-import { sendEmail } from './resend.service';
+import { sendSupervisorMagicLinkEmail } from './resend.service';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 
@@ -40,12 +40,10 @@ export async function sendSupervisorMagicLink(supervisorEmail: string) {
     .update({ confirmation_token: token, token_expires_at: expiresAt })
     .eq('id', verifications[0].id);
 
-  await sendEmail({
-    to: supervisorEmail,
-    subject: 'Your Merit supervisor dashboard',
-    html: `<p>Click below to view and manage all student verifications that need your response.</p>
-           <p><a href="${dashUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block">Open my dashboard</a></p>
-           <p style="font-size:12px;color:#666;margin-top:24px">This link expires in 24 hours. — Merit</p>`,
+  await sendSupervisorMagicLinkEmail({
+    supervisorEmail,
+    pendingCount: verifications.length,
+    dashUrl,
   });
 
   logger.info({ supervisorEmail }, 'supervisor_magic_link_sent');

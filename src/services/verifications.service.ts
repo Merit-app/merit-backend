@@ -3,7 +3,7 @@ import { AppError, NotFoundError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { generateUrlSafeToken } from '../lib/crypto';
 import { sendSms } from './twilio.service';
-import { sendEmail } from './resend.service';
+import { sendVerificationRequestEmail } from './resend.service';
 import { trackEvent } from './analytics.service';
 import { incrementAuthenticatorStats, determineVerificationTier, recalculateDomainTrust } from './trust.service';
 import { formatVerificationSMS } from '../templates/sms/verification';
@@ -119,21 +119,19 @@ export async function sendVerificationEmail(
     token_expires_at: expiresAt.toISOString(),
   });
 
-  const verifyUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/verify?token=${token}`;
+  const baseUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/verify?token=${token}`;
   const org = session.org ?? { name: 'your organization' };
 
-  await sendEmail({
-    to: session.supervisor_email,
-    subject: `Verify ${user.name}'s volunteer hours at ${org.name}`,
-    html: `
-      <p>Hi ${session.supervisor_name},</p>
-      <p><strong>${user.name}</strong> logged <strong>${session.hours} hours</strong> at <strong>${org.name}</strong> on ${session.date}.</p>
-      <p><a href="${verifyUrl}&response=YES" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block">Verify these hours</a></p>
-      <p style="margin-top:16px">If this is wrong: <a href="${verifyUrl}&response=NO">Dispute</a></p>
-      <p style="font-size:12px;color:#666;margin-top:24px">
-        <a href="${verifyUrl}&response=STOP">Unsubscribe from Merit emails</a>
-      </p>
-    `,
+  await sendVerificationRequestEmail({
+    supervisorEmail: session.supervisor_email,
+    supervisorName: session.supervisor_name,
+    studentName: user.name,
+    hours: Number(session.hours),
+    orgName: org.name,
+    date: session.date,
+    verifyUrl: `${baseUrl}&response=YES`,
+    disputeUrl: `${baseUrl}&response=NO`,
+    unsubscribeUrl: `${baseUrl}&response=STOP`,
   });
 
   trackEvent(user.id, 'verification_sent', { sessionId: session.id, channel: 'email' });

@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "jsx": "react",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true
