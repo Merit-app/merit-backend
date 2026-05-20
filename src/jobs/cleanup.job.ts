@@ -51,6 +51,6 @@ export async function cleanupIpRateLimits(): Promise<void> {
   await supabaseAdmin
     .from('ip_rate_limits')
     .delete()
-    .lt('window_start', cutoff);
+    .lt('hour', cutoff);
   logger.debug({ cutoff }, 'ip_rate_limits_cleaned');
 }
