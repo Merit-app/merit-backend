@@ -1,7 +1,53 @@
+import 'dotenv/config';
 import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import morgan from 'morgan';
 
-export const app = express();
+import { env } from './config/env';
+import { requestId } from './middleware/request-id.middleware';
+import { notFound } from './middleware/not-found.middleware';
+import { errorHandler } from './middleware/error-handler.middleware';
+import { getSentryRequestHandler, getSentryErrorHandler } from './config/sentry';
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
-});
+const app = express();
+
+// Sentry request handler (must be first)
+const sentryRequest = getSentryRequestHandler();
+if (sentryRequest) app.use(sentryRequest);
+
+// Security & parsing
+app.use(helmet());
+
+const allowedOrigins = env.ALLOWED_ORIGINS
+  ? env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : ['http://localhost:3000', 'http://localhost:5173'];
+
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+      cb(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+  }),
+);
+
+app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(requestId);
+
+// Routes
+import healthRouter from './routes/health.routes';
+app.use('/', healthRouter);
+
+// 404 & error handling
+app.use(notFound);
+
+const sentryError = getSentryErrorHandler();
+if (sentryError) app.use(sentryError);
+
+app.use(errorHandler);
+
+export { app };
