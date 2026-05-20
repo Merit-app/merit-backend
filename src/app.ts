@@ -40,7 +40,9 @@ app.use(requestId);
 
 // Routes
 import healthRouter from './routes/health.routes';
+import authRouter from './routes/auth.routes';
 app.use('/', healthRouter);
+app.use('/', authRouter);
 
 // 404 & error handling
 app.use(notFound);
