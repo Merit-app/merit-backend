@@ -34,6 +34,11 @@ app.use(
 );
 
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// Stripe webhook must receive raw body — mount before express.json()
+import stripeWebhookRouter from './routes/stripe-webhook.routes';
+app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRouter);
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(requestId);
@@ -49,6 +54,7 @@ import magicLinkRouter from './routes/magic-link.routes';
 import webhooksRouter from './routes/webhooks.routes';
 import statsRouter from './routes/stats.routes';
 import notificationsRouter from './routes/notifications.routes';
+import billingRouter from './routes/billing.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -59,6 +65,7 @@ app.use('/', magicLinkRouter);
 app.use('/', webhooksRouter);
 app.use('/', statsRouter);
 app.use('/', notificationsRouter);
+app.use('/', billingRouter);
 
 // 404 & error handling
 app.use(notFound);
