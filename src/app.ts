@@ -56,6 +56,7 @@ import statsRouter from './routes/stats.routes';
 import notificationsRouter from './routes/notifications.routes';
 import billingRouter from './routes/billing.routes';
 import adminRouter from './routes/admin.routes';
+import exportsRouter from './routes/exports.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -68,6 +69,7 @@ app.use('/', statsRouter);
 app.use('/', notificationsRouter);
 app.use('/', billingRouter);
 app.use('/', adminRouter);
+app.use('/', exportsRouter);
 
 // 404 & error handling
 app.use(notFound);
