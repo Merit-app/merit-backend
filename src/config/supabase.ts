@@ -29,6 +29,7 @@ const mockSupabase = {
     signUp: async (_creds: any) => ({ data: null, error: null }),
     signInWithPassword: async (_creds: any) => ({ data: null, error: null }),
     admin: {
+      createUser: async (_attrs: any) => ({ data: { user: { id: 'mock-user-id', email: _attrs.email } }, error: null }),
       deleteUser: async (_id: string) => ({ data: null, error: null }),
       getUserById: async (_id: string) => ({ data: { user: null }, error: null }),
     },

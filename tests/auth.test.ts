@@ -49,11 +49,18 @@ vi.mock('../src/config/supabase', () => {
     supabaseAdmin: {
       from: () => makeChain(),
       auth: {
-        signUp: vi.fn().mockResolvedValue({
-          data: { user: { id: 'auth-user-1' } },
-          error: null,
-        }),
-        admin: { deleteUser: vi.fn().mockResolvedValue({ error: null }) },
+        admin: {
+          createUser: vi.fn().mockResolvedValue({
+            data: { user: { id: 'auth-user-1' } },
+            error: null,
+          }),
+          deleteUser: vi.fn().mockResolvedValue({ error: null }),
+        },
+      },
+    },
+    supabaseAuth: {
+      auth: {
+        signInWithPassword: vi.fn().mockResolvedValue({ data: null, error: null }),
       },
     },
     SUPABASE_MODE: 'mock',
