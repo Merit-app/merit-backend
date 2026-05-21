@@ -1,4 +1,4 @@
-import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
+import { supabaseAdmin, supabaseAuth, SUPABASE_MODE } from '../config/supabase';
 import { AppError, UnauthorizedError } from '../lib/errors';
 import { checkPasswordStrength } from '../lib/password';
 import { generateUrlSafeToken } from '../lib/crypto';
@@ -80,14 +80,13 @@ export async function signup(input: {
     throw new AppError('email_taken', 'An account with this email already exists.', 409);
   }
 
-  // 4. Create Supabase auth user
-  const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
+  // 4. Create Supabase auth user via admin API (avoids session contamination that
+  //    causes subsequent service-role DB calls to run as the new user, hitting RLS)
+  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email: input.email,
     password: input.password,
-    options: {
-      data: { name: input.name },
-      emailRedirectTo: `${env.FRONTEND_URL ?? 'http://localhost:3000'}/auth/confirm`,
-    },
+    email_confirm: true,   // skip confirmation email — handled by Resend below
+    user_metadata: { name: input.name },
   });
 
   if (authError || !authData.user) {
@@ -175,7 +174,7 @@ export async function login(input: { email: string; password: string; ip?: strin
   }
 
   // 2. Attempt sign in
-  const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+  const { data, error } = await supabaseAuth.auth.signInWithPassword({
     email: input.email,
     password: input.password,
   });
@@ -232,7 +231,7 @@ export async function refreshSession(refreshToken: string) {
     return { accessToken: 'mock-token', refreshToken, expiresAt: Date.now() + 3600000 };
   }
 
-  const { data, error } = await (supabaseAdmin.auth as any).refreshSession?.({ refresh_token: refreshToken })
+  const { data, error } = await (supabaseAuth.auth as any).refreshSession?.({ refresh_token: refreshToken })
     ?? { data: null, error: new Error('refresh not supported in this mode') };
 
   if (error || !data?.session) {
@@ -341,7 +340,7 @@ export async function processParentalConsent(opts: {
 export async function getMe(userId: string) {
   const { data, error } = await supabaseAdmin
     .from('users')
-    .select('*, chapter:chapters(id, name, type, logo_url)')
+    .select('*, chapter:chapters!fk_users_chapter(id, name, type, logo_url)')
     .eq('id', userId)
     .is('deleted_at', null)
     .single();

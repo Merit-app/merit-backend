@@ -10,8 +10,6 @@ declare global {
         name: string;
         role: string;
         plan: Plan;
-        firstName?: string;
-        lastName?: string;
       };
       authUser?: {
         id: string;

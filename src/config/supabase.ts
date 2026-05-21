@@ -55,15 +55,25 @@ const isReal = !!(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 export const SUPABASE_MODE: 'real' | 'mock' = isReal ? 'real' : 'mock';
 
 let supabaseAdminInstance: typeof mockSupabase | any;
+let supabaseAuthInstance: typeof mockSupabase | any;
 
 if (isReal) {
-  // Dynamic import to avoid pulling in the SDK when in mock mode
   const { createClient } = require('@supabase/supabase-js');
+  // Service-role client — used ONLY for DB operations. Never call auth.signIn/signUp
+  // on this client or it contaminates the shared session with the user's JWT.
   supabaseAdminInstance = createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  // Anon client — used for auth operations (signInWithPassword, refreshSession, etc.)
+  // Safe to call auth methods on; uses anon key so DB access is RLS-gated.
+  supabaseAuthInstance = createClient(env.SUPABASE_URL!, env.SUPABASE_ANON_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 } else {
   supabaseAdminInstance = mockSupabase;
+  supabaseAuthInstance = mockSupabase;
 }
 
 export const supabaseAdmin = supabaseAdminInstance;
+// Use supabaseAuth for signInWithPassword, refreshSession, resetPassword etc.
+export const supabaseAuth = supabaseAuthInstance;

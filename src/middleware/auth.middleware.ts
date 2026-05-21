@@ -22,8 +22,8 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 
     const { data: appUser, error: userErr } = await supabaseAdmin
       .from('users')
-      .select('id, email, name, role, plan, first_name, last_name')
-      .eq('auth_id', data.user.id)
+      .select('id, email, name, role, plan')
+      .eq('id', data.user.id)
       .single();
 
     if (userErr || !appUser) {
@@ -34,11 +34,9 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     req.user = {
       id: appUser.id,
       email: appUser.email,
-      name: appUser.name ?? `${appUser.first_name ?? ''} ${appUser.last_name ?? ''}`.trim(),
+      name: appUser.name ?? '',
       role: appUser.role,
       plan: appUser.plan,
-      firstName: appUser.first_name,
-      lastName: appUser.last_name,
     };
 
     next();
