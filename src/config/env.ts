@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-const envSchema = z.object({
+// Coerce empty strings → undefined so optional().url() validators don't reject blank .env values
+const coerceEmptyStrings = (obj: unknown) =>
+  Object.fromEntries(
+    Object.entries(obj as Record<string, unknown>).map(([k, v]) => [k, v === '' ? undefined : v]),
+  );
+
+const envSchema = z.preprocess(coerceEmptyStrings, z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3001),
 
@@ -65,7 +71,7 @@ const envSchema = z.object({
 
   // External APIs
   PROPUBLICA_API_BASE: z.string().url().optional(),
-});
+}));
 
 const prodRequiredKeys: (keyof z.infer<typeof envSchema>)[] = [
   'SUPABASE_URL',
