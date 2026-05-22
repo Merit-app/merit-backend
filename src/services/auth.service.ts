@@ -80,11 +80,12 @@ export async function signup(input: {
     throw new AppError('email_taken', 'An account with this email already exists.', 409);
   }
 
-  // 4. Create Supabase auth user via standard signUp.
-  //    Avoids the admin API (which fails in some Railway/GoTrue configurations).
-  //    Requires "Confirm email" to be disabled in Supabase Auth → Providers → Email
-  //    so the account is usable immediately (confirmation handled by Resend below).
-  const { data: authData, error: authError } = await supabaseAuth.auth.signUp({
+  // 4. Create Supabase auth user.
+  //    Uses the service-role client's .auth.signUp() (NOT the admin sub-client) so we
+  //    avoid the /auth/v1/admin/* paths that fail on some Railway/GoTrue configs, while
+  //    still relying on the service-role key whose URL we've confirmed works for DB ops.
+  //    Requires "Confirm email" to be disabled in Supabase Auth → Providers → Email.
+  const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
     email: input.email,
     password: input.password,
     options: { data: { name: input.name } },
