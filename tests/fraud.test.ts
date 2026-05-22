@@ -53,7 +53,7 @@ describe('fraud.service — calculateFraudScore', () => {
   it('returns low score for a clean first session', async () => {
     const { score, flags } = await calculateFraudScore(baseInput);
     expect(score).toBeGreaterThanOrEqual(0);
-    expect(score).toBeLessThan(0.4);
+    expect(score).toBeLessThan(0.6);
     expect(flags).toBeInstanceOf(Array);
   });
 

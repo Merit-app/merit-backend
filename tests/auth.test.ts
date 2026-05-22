@@ -60,6 +60,10 @@ vi.mock('../src/config/supabase', () => {
     },
     supabaseAuth: {
       auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: { id: 'auth-user-1' } },
+          error: null,
+        }),
         signInWithPassword: vi.fn().mockResolvedValue({ data: null, error: null }),
       },
     },

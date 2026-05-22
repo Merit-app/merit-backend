@@ -80,16 +80,17 @@ export async function signup(input: {
     throw new AppError('email_taken', 'An account with this email already exists.', 409);
   }
 
-  // 4. Create Supabase auth user via admin API (avoids session contamination that
-  //    causes subsequent service-role DB calls to run as the new user, hitting RLS)
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+  // 4. Create Supabase auth user via standard signUp.
+  //    Avoids the admin API (which fails in some Railway/GoTrue configurations).
+  //    Requires "Confirm email" to be disabled in Supabase Auth → Providers → Email
+  //    so the account is usable immediately (confirmation handled by Resend below).
+  const { data: authData, error: authError } = await supabaseAuth.auth.signUp({
     email: input.email,
     password: input.password,
-    email_confirm: true,   // skip confirmation email — handled by Resend below
-    user_metadata: { name: input.name },
+    options: { data: { name: input.name } },
   });
 
-  if (authError || !authData.user) {
+  if (authError || !authData?.user) {
     logger.error({ authError }, 'supabase_signup_failed');
     throw new AppError('signup_failed', authError?.message ?? 'Failed to create account.', 500);
   }
