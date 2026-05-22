@@ -81,26 +81,51 @@ export async function signup(input: {
   }
 
   // 4. Create Supabase auth user.
-  //    Uses the service-role client's .auth.signUp() (NOT the admin sub-client) so we
-  //    avoid the /auth/v1/admin/* paths that fail on some Railway/GoTrue configs, while
-  //    still relying on the service-role key whose URL we've confirmed works for DB ops.
-  //    Requires "Confirm email" to be disabled in Supabase Auth → Providers → Email.
-  const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-    email: input.email,
-    password: input.password,
-    options: { data: { name: input.name } },
-  });
+  //    In mock mode: use the mock client so tests pass without a network call.
+  //    In real mode: bypass @supabase/auth-js with a raw GoTrue HTTP call to avoid
+  //    URL-construction bugs in the SDK on Railway. Uses the same SUPABASE_URL +
+  //    SERVICE_ROLE_KEY that DB operations already confirm works.
+  let authUserId: string;
 
-  if (authError || !authData?.user) {
-    logger.error({ authError }, 'supabase_signup_failed');
-    throw new AppError('signup_failed', authError?.message ?? 'Failed to create account.', 500);
+  if (SUPABASE_MODE === 'mock') {
+    const { data: mockAuthData, error: mockAuthError } = await supabaseAdmin.auth.signUp({
+      email: input.email,
+      password: input.password,
+      options: { data: { name: input.name } },
+    });
+    if (mockAuthError || !mockAuthData?.user) {
+      throw new AppError('signup_failed', mockAuthError?.message ?? 'Failed to create account.', 500);
+    }
+    authUserId = mockAuthData.user.id;
+  } else {
+    const gotrueUrl = `${env.SUPABASE_URL}/auth/v1/admin/users`;
+    const gotrueRes = await fetch(gotrueUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'apikey': env.SUPABASE_SERVICE_ROLE_KEY!,
+      },
+      body: JSON.stringify({
+        email: input.email,
+        password: input.password,
+        email_confirm: true,
+        user_metadata: { name: input.name },
+      }),
+    });
+    const gotrueBody = await gotrueRes.json() as any;
+    if (!gotrueRes.ok || !gotrueBody?.id) {
+      logger.error({ status: gotrueRes.status, body: gotrueBody, url: gotrueUrl }, 'supabase_signup_failed');
+      throw new AppError('signup_failed', gotrueBody?.msg ?? gotrueBody?.message ?? 'Failed to create account.', 500);
+    }
+    authUserId = gotrueBody.id as string;
   }
 
   // 5. Insert app user row
   const { data: appUser, error: insertError } = await supabaseAdmin
     .from('users')
     .insert({
-      id: authData.user.id,
+      id: authUserId,
       email: input.email,
       name: input.name,
       age_tier: ageTier,
@@ -120,7 +145,7 @@ export async function signup(input: {
   if (insertError || !appUser) {
     logger.error({ insertError }, 'user_row_insert_failed');
     // Best-effort cleanup
-    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+    await supabaseAdmin.auth.admin.deleteUser(authUserId);
     throw new AppError('signup_failed', 'Failed to create user profile.', 500);
   }
 
