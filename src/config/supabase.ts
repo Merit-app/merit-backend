@@ -51,6 +51,16 @@ const mockSupabase = {
   }),
 };
 
+// Normalize SUPABASE_URL: strip trailing slash and any /rest/v1 or /auth/v1 suffix
+// so the Supabase client always receives the bare project URL.
+// This handles the common mistake of setting SUPABASE_URL to the PostgREST endpoint.
+function normalizeSupabaseUrl(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  let url = raw.replace(/\/+$/, '');               // strip trailing slashes
+  url = url.replace(/\/(rest|auth)\/v\d+.*$/, ''); // strip known path suffixes
+  return url;
+}
+
 const isReal = !!(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 
 export const SUPABASE_MODE: 'real' | 'mock' = isReal ? 'real' : 'mock';
@@ -60,14 +70,15 @@ let supabaseAuthInstance: typeof mockSupabase | any;
 
 if (isReal) {
   const { createClient } = require('@supabase/supabase-js');
+  const projectUrl = normalizeSupabaseUrl(env.SUPABASE_URL)!;
   // Service-role client — used ONLY for DB operations. Never call auth.signIn/signUp
   // on this client or it contaminates the shared session with the user's JWT.
-  supabaseAdminInstance = createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
+  supabaseAdminInstance = createClient(projectUrl, env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   // Anon client — used for auth operations (signInWithPassword, refreshSession, etc.)
   // Safe to call auth methods on; uses anon key so DB access is RLS-gated.
-  supabaseAuthInstance = createClient(env.SUPABASE_URL!, env.SUPABASE_ANON_KEY!, {
+  supabaseAuthInstance = createClient(projectUrl, env.SUPABASE_ANON_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 } else {

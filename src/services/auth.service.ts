@@ -98,7 +98,8 @@ export async function signup(input: {
     }
     authUserId = mockAuthData.user.id;
   } else {
-    const gotrueUrl = `${env.SUPABASE_URL}/auth/v1/admin/users`;
+    const projectUrl = (env.SUPABASE_URL ?? '').replace(/\/+$/, '').replace(/\/(rest|auth)\/v\d+.*$/, '');
+    const gotrueUrl = `${projectUrl}/auth/v1/admin/users`;
     const gotrueRes = await fetch(gotrueUrl, {
       method: 'POST',
       headers: {

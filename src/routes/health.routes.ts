@@ -30,7 +30,8 @@ router.get('/health/ready', (_req, res) => {
 // Temporary diagnostic: test GoTrue connectivity from Railway.
 // Remove after signup issue is diagnosed.
 router.get('/health/gotrue', async (_req, res) => {
-  const supabaseUrl = env.SUPABASE_URL ?? '(not set)';
+  const rawUrl = env.SUPABASE_URL ?? '(not set)';
+  const supabaseUrl = rawUrl.replace(/\/+$/, '').replace(/\/(rest|auth)\/v\d+.*$/, '');
   const gotrueUrl = `${supabaseUrl}/auth/v1/admin/users`;
   try {
     const resp = await fetch(gotrueUrl, {
@@ -42,6 +43,7 @@ router.get('/health/gotrue', async (_req, res) => {
     });
     const body = await resp.text();
     res.json({
+      rawUrlSuffix: rawUrl.slice(-30),   // last 30 chars to see if path is included
       gotrueUrl,
       supabaseUrlPattern: supabaseUrl.replace(/[a-z0-9]{20,}/gi, '[REDACTED]'),
       httpStatus: resp.status,
