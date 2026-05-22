@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const createSessionSchema = z.object({
-  orgId: z.string().uuid().optional(),
+  orgId: z.string().uuid().optional().nullable(),
   newOrg: z
     .object({
       name: z.string().min(1).max(200),

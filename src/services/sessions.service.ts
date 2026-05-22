@@ -73,7 +73,7 @@ export async function createSession(userId: string, input: CreateSessionInput, u
   const supervisorEmail = input.supervisorEmail?.toLowerCase();
 
   // 2. Resolve org
-  const orgId = await resolveOrCreateOrg({ orgId: input.orgId, newOrg: input.newOrg });
+  const orgId = await resolveOrCreateOrg({ orgId: input.orgId ?? undefined, newOrg: input.newOrg });
 
   // 3. Resolve or create authenticator
   const authenticator = await resolveOrCreateAuthenticator({
