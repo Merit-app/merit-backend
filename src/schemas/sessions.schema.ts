@@ -14,8 +14,8 @@ export const createSessionSchema = z.object({
   hours: z.number().min(0.5).max(12),
   activity: z.string().min(1).max(500),
   supervisorName: z.string().min(1).max(100),
-  supervisorPhone: z.string().optional(),
-  supervisorEmail: z.string().email().optional(),
+  supervisorPhone: z.string().optional().nullable(),
+  supervisorEmail: z.string().email().optional().nullable(),
 }).refine((d) => d.orgId || d.newOrg, {
   message: 'Must provide orgId or newOrg',
 }).refine((d) => d.supervisorPhone || d.supervisorEmail, {
@@ -25,8 +25,8 @@ export const createSessionSchema = z.object({
 export const updateSessionSchema = z.object({
   activity: z.string().min(1).max(500).optional(),
   supervisorName: z.string().min(1).max(100).optional(),
-  supervisorPhone: z.string().optional(),
-  supervisorEmail: z.string().email().optional(),
+  supervisorPhone: z.string().optional().nullable(),
+  supervisorEmail: z.string().email().optional().nullable(),
 });
 
 export const sessionQuerySchema = z.object({

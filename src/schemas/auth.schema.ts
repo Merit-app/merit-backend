@@ -7,8 +7,8 @@ export const signupSchema = z.object({
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
   school: z.string().max(200).optional(),
   grade: z.number().int().min(6).max(12).optional(),
-  goalProgram: z.enum(['NHS', 'IB', 'graduation', 'scholarship', 'personal', 'other']).optional(),
-  goalHours: z.number().int().min(1).max(9999).optional(),
+  goalProgram: z.string().min(1).max(50).optional(),
+  goalHours: z.number().min(1).max(9999).optional(),
   marketingConsent: z.boolean().optional().default(false),
   parentEmail: z.string().email().optional(),
 });

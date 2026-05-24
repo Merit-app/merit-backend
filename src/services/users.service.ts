@@ -31,10 +31,16 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
   if (input.notifications !== undefined) updates.notifications = input.notifications;
 
   if (input.phone !== undefined) {
-    const normalized = normalizePhone(input.phone);
-    if (!normalized) throw new AppError('invalid_phone', 'Phone number is not valid.', 400);
-    updates.phone = normalized;
+    if (input.phone === null) {
+      updates.phone = null;
+    } else {
+      const normalized = normalizePhone(input.phone);
+      if (!normalized) throw new AppError('invalid_phone', 'Phone number is not valid.', 400);
+      updates.phone = normalized;
+    }
   }
+
+  // email changes are managed through Supabase auth flows — ignore here
 
   if (input.marketingConsent !== undefined) {
     updates.marketing_consent = input.marketingConsent;
