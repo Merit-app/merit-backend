@@ -22,13 +22,13 @@
   "dependencies": {
     "@react-email/components": "^1.0.12",
     "@react-pdf/renderer": "^4.5.1",
+    "@rolldown/binding-win32-x64-msvc": "^1.0.2",
     "@sentry/node": "^10.53.1",
     "@sentry/profiling-node": "^10.53.1",
     "@supabase/supabase-js": "^2.106.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
-    "@types/node": "^25.9.1",
     "@types/node-cron": "^3.0.11",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
@@ -53,17 +53,18 @@
     "stripe": "^22.1.1",
     "ts-node-dev": "^2.0.0",
     "twilio": "^6.0.2",
-    "typescript": "^6.0.3",
     "undici": "^8.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^20.19.41",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.59.4",
     "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^10.4.0",
     "prettier": "^3.8.3",
     "supertest": "^7.2.2",
+    "typescript": "^5.7.3",
     "vitest": "^4.1.6"
   },
   "engines": {
