@@ -96,21 +96,47 @@ export async function createPortalSession(userId: string, returnUrl?: string) {
 // ─── Get current subscription ─────────────────────────────────────────────
 
 export async function getSubscription(userId: string) {
+  // Select only columns guaranteed to exist in users table (plan + stripe_customer_id)
   const { data: user } = await supabaseAdmin
     .from('users')
-    .select('plan, stripe_customer_id, stripe_subscription_id, subscription_status, subscription_period_end')
+    .select('id, plan, stripe_customer_id')
     .eq('id', userId)
     .maybeSingle();
 
   if (!user) throw new NotFoundError('User');
 
   const u = user as any;
+
+  // Try to pull richer subscription data from subscriptions table (may not exist yet)
+  let stripeSubscriptionId: string | null = null;
+  let status: string = u.plan === 'free' ? 'free' : 'active';
+  let periodEnd: string | null = null;
+
+  try {
+    const { data: sub } = await supabaseAdmin
+      .from('subscriptions')
+      .select('stripe_subscription_id, status, current_period_end')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sub) {
+      const s = sub as any;
+      stripeSubscriptionId = s.stripe_subscription_id ?? null;
+      status = s.status ?? status;
+      periodEnd = s.current_period_end ?? null;
+    }
+  } catch {
+    // subscriptions table may not exist — degrade gracefully
+  }
+
   return {
     plan: u.plan as Plan,
     stripeCustomerId: u.stripe_customer_id ?? null,
-    stripeSubscriptionId: u.stripe_subscription_id ?? null,
-    status: u.subscription_status ?? (u.plan === 'free' ? 'free' : 'unknown'),
-    periodEnd: u.subscription_period_end ?? null,
+    stripeSubscriptionId,
+    status,
+    periodEnd,
   };
 }
 

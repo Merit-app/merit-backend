@@ -26,7 +26,22 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
   if (input.school !== undefined) updates.school = input.school;
   if (input.grade !== undefined) updates.grade = input.grade;
   if (input.graduationYear !== undefined) updates.graduation_year = input.graduationYear;
-  if (input.goalProgram !== undefined) updates.goal_program = input.goalProgram;
+  if (input.goalProgram !== undefined) {
+    // Map frontend display values → DB-stored values (keep constraint-safe)
+    const PROGRAM_MAP: Record<string, string> = {
+      'IB CAS': 'IB',
+      'Graduation': 'graduation',
+      'Scholarship': 'scholarship',
+      'Custom': 'personal',
+      'NHS': 'NHS',
+      'IB': 'IB',
+      'personal': 'personal',
+      'other': 'other',
+    };
+    updates.goal_program = input.goalProgram === null
+      ? null
+      : (PROGRAM_MAP[input.goalProgram] ?? input.goalProgram);
+  }
   if (input.goalHours !== undefined) updates.goal_hours = input.goalHours;
   if (input.notifications !== undefined) updates.notifications = input.notifications;
 
