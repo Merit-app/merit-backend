@@ -10,7 +10,6 @@ import {
   resetPasswordSchema,
   confirmEmailSchema,
   resendConfirmationSchema,
-  parentalConsentSchema,
 } from '../schemas/auth.schema';
 import * as authService from '../services/auth.service';
 import { success } from '../utils/shape';
@@ -148,14 +147,14 @@ router.get(
   },
 );
 
-// POST /auth/parental-consent
-router.post(
-  '/auth/parental-consent',
-  validate(parentalConsentSchema),
+// PATCH /auth/accept-consent — minor self-accepts on /onboarding/consent page
+router.patch(
+  '/auth/accept-consent',
+  requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await authService.processParentalConsent(req.body);
-      res.json(success(result));
+      const user = await authService.acceptConsent(req.user!.id);
+      res.json(success({ user }));
     } catch (err) {
       next(err);
     }

@@ -10,8 +10,10 @@ export const signupSchema = z.object({
   goalProgram: z.string().min(1).max(50).optional(),
   goalHours: z.number().min(1).max(9999).optional(),
   marketingConsent: z.boolean().optional().default(false),
-  parentEmail: z.string().email().optional(),
 });
+
+// New: user self-accepts consent on the /onboarding/consent page
+export const acceptConsentSchema = z.object({});
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -47,3 +49,4 @@ export const parentalConsentSchema = z.object({
 
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type AcceptConsentInput = z.infer<typeof acceptConsentSchema>;

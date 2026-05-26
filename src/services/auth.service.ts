@@ -1,14 +1,12 @@
 import { supabaseAdmin, supabaseAuth, SUPABASE_MODE } from '../config/supabase';
 import { AppError, UnauthorizedError } from '../lib/errors';
 import { checkPasswordStrength } from '../lib/password';
-import { generateUrlSafeToken } from '../lib/crypto';
 import { signPayload, verifyPayload } from '../lib/jwt';
 import { logger } from '../lib/logger';
 import { env } from '../config/env';
 import {
   sendWelcomeEmail,
   sendPasswordResetEmail,
-  sendParentalConsentEmail,
   sendAccountDeletionEmail,
 } from './resend.service';
 import { trackEvent } from './analytics.service';
@@ -42,7 +40,6 @@ export async function signup(input: {
   goalProgram?: string;
   goalHours?: number;
   marketingConsent?: boolean;
-  parentEmail?: string;
 }) {
   // 1. Age check
   const age = calculateAge(input.dateOfBirth);
@@ -50,10 +47,6 @@ export async function signup(input: {
 
   if (ageTier === 'under_13') {
     throw new AppError('age_restricted', 'Users must be 13 or older to use Merit.', 403);
-  }
-
-  if (ageTier === 'minor' && !input.parentEmail) {
-    throw new AppError('parental_email_required', 'A parent or guardian email is required for users under 18.', 400);
   }
 
   // 2. Password strength
@@ -136,9 +129,10 @@ export async function signup(input: {
       goal_program: input.goalProgram ?? null,
       goal_hours: input.goalHours ?? 75,
       is_minor: ageTier === 'minor',
+      // Minors self-accept consent on /onboarding/consent; pre-set false
+      parental_consent_received: ageTier !== 'minor',
       marketing_consent: input.marketingConsent ?? false,
       marketing_consent_at: input.marketingConsent ? new Date().toISOString() : null,
-      parental_consent_email: input.parentEmail ?? null,
     })
     .select()
     .single();
@@ -154,23 +148,14 @@ export async function signup(input: {
   const confirmationUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/auth/confirm`;
   await sendWelcomeEmail({ name: input.name, email: input.email, confirmationUrl });
 
-  if (ageTier === 'minor' && input.parentEmail) {
-    const consentToken = signPayload({ userId: appUser.id, type: 'parental_consent' }, env.MAGIC_LINK_SECRET, 7 * 24 * 3600);
-    const consentUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/parental-consent?token=${consentToken}`;
-    await sendParentalConsentEmail({
-      parentEmail: input.parentEmail,
-      studentName: input.name,
-      consentUrl,
-    });
-  }
-
   // 7. Analytics
   trackEvent(appUser.id, 'signup', { ageTier, goalProgram: input.goalProgram, plan: 'free' });
 
   return {
     user: appUser,
     requiresEmailConfirmation: true,
-    requiresParentalConsent: ageTier === 'minor',
+    requiresParentalConsent: false,
+    requiresOnboardingConsent: ageTier === 'minor',
   };
 }
 
@@ -361,6 +346,25 @@ export async function processParentalConsent(opts: {
     .eq('id', payload.userId);
 
   return { userId: payload.userId, consent: opts.consent };
+}
+
+// ─── Accept onboarding consent (minor self-acceptance) ────────────────────
+
+export async function acceptConsent(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .update({
+      parental_consent_received: true,
+      parental_consent_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
+    .is('deleted_at', null)
+    .select()
+    .single();
+
+  if (error || !data) throw new AppError('update_failed', 'Failed to record consent.', 500);
+  logger.info({ userId }, 'minor_consent_accepted');
+  return data;
 }
 
 // ─── Get current user ──────────────────────────────────────────────────────
