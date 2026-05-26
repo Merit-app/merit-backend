@@ -57,6 +57,8 @@ import notificationsRouter from './routes/notifications.routes';
 import billingRouter from './routes/billing.routes';
 import adminRouter from './routes/admin.routes';
 import exportsRouter from './routes/exports.routes';
+import profilesRouter from './routes/profiles.routes';
+import onboardingRouter from './routes/onboarding.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -70,6 +72,8 @@ app.use('/', notificationsRouter);
 app.use('/', billingRouter);
 app.use('/', adminRouter);
 app.use('/', exportsRouter);
+app.use('/', profilesRouter);
+app.use('/', onboardingRouter);
 
 // 404 & error handling
 app.use(notFound);

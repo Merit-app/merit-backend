@@ -53,7 +53,12 @@
     "ts-node-dev": "^2.0.0",
     "twilio": "^6.0.2",
     "undici": "^8.3.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "slugify": "^1.6.6",
+    "nanoid": "^3.3.7",
+    "isomorphic-dompurify": "^2.19.0",
+    "disposable-email-domains": "^1.0.66",
+    "@types/dompurify": "^3.0.5"
   },
   "devDependencies": {
     "@types/node": "^20.19.41",

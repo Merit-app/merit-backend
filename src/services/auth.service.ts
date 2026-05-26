@@ -10,6 +10,7 @@ import {
   sendAccountDeletionEmail,
 } from './resend.service';
 import { trackEvent } from './analytics.service';
+import { generateUsername } from './usernames.service';
 
 // ─── Age helpers ───────────────────────────────────────────────────────────
 
@@ -116,12 +117,19 @@ export async function signup(input: {
   }
 
   // 5. Insert app user row
+  // Generate username from name parts (first word = first name, rest = last name)
+  const nameParts = input.name.trim().split(/\s+/);
+  const firstName = nameParts[0] ?? input.name;
+  const lastName = nameParts.slice(1).join(' ') || firstName;
+  const username = await generateUsername(firstName, lastName);
+
   const { data: appUser, error: insertError } = await supabaseAdmin
     .from('users')
     .insert({
       id: authUserId,
       email: input.email,
       name: input.name,
+      username,
       age_tier: ageTier,
       date_of_birth: input.dateOfBirth,
       school: input.school ?? null,
