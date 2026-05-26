@@ -7,6 +7,7 @@ import { runDailyFraudScan } from '../services/fraud.service';
 import { scheduleCleanup, cleanupIpRateLimits } from './cleanup.job';
 import { processMilestones } from './milestone.job';
 import { processDataRetention } from './data-retention.job';
+import { refreshAllBadges } from './badge-refresh.job';
 
 const TZ = 'America/Los_Angeles';
 
@@ -54,6 +55,11 @@ export function registerJobs(): void {
   cron.schedule('0 * * * *', async () => {
     try { await cleanupIpRateLimits(); } catch (err) { logger.error({ err }, 'ip_rate_limit_cleanup_error'); }
   });
+
+  // Daily at 1 AM PT — refresh badges for all users
+  cron.schedule('0 1 * * *', async () => {
+    try { await refreshAllBadges(); } catch (err) { logger.error({ err }, 'badge_refresh_job_error'); }
+  }, { timezone: TZ });
 
   logger.info('background_jobs_registered');
 }
