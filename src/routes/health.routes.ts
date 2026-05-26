@@ -17,6 +17,7 @@ router.get('/health', (_req, res) => {
       stripe: STRIPE_MODE,
     },
     version: process.env.npm_package_version ?? '1.0.0',
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local',
     timestamp: new Date().toISOString(),
   });
 });
