@@ -144,6 +144,40 @@ export async function cancelAccountDeletion(userId: string) {
   return { cancelled: true };
 }
 
+export async function updateUserNotifications(
+  userId: string,
+  prefs: {
+    smsVerification?: boolean;
+    weeklyProgress?: boolean;
+    goalMilestones?: boolean;
+    productUpdates?: boolean;
+    marketingEmails?: boolean;
+  },
+) {
+  // Fetch current prefs so we only overwrite what was explicitly sent
+  const { data: current } = await supabaseAdmin
+    .from('users')
+    .select('notifications')
+    .eq('id', userId)
+    .is('deleted_at', null)
+    .single();
+
+  if (!current) throw new NotFoundError('User');
+
+  const merged = { ...(current.notifications as object ?? {}), ...prefs };
+
+  const { data, error } = await supabaseAdmin
+    .from('users')
+    .update({ notifications: merged })
+    .eq('id', userId)
+    .is('deleted_at', null)
+    .select('notifications')
+    .single();
+
+  if (error || !data) throw new AppError('update_failed', 'Failed to update notification preferences.', 500);
+  return data.notifications;
+}
+
 export async function exportUserData(userId: string) {
   const [userRes, sessionsRes, verificationsRes, notificationsRes, subscriptionsRes] = await Promise.all([
     supabaseAdmin.from('users').select('*').eq('id', userId).single(),

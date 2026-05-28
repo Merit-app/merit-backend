@@ -10,12 +10,21 @@ const router = Router();
 router.use('/exports', requireAuth);
 
 // POST /exports/pdf  — plan-gated to pro+
+// Body: { from?: string (YYYY-MM-DD), to?: string (YYYY-MM-DD), includeSelfReported?: boolean }
 router.post(
   '/exports/pdf',
   requireFeature('export_pdf'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await exportsService.exportSessionsPdf(req.user!.id);
+      const opts = z
+        .object({
+          from: z.string().date().optional(),
+          to: z.string().date().optional(),
+          includeSelfReported: z.boolean().optional().default(false),
+        })
+        .parse(req.body);
+
+      const result = await exportsService.exportSessionsPdf(req.user!.id, opts);
       res.json(success(result));
     } catch (err) {
       next(err);

@@ -204,6 +204,34 @@ export async function deleteSession(sessionId: string, userId: string) {
   return { deleted: true };
 }
 
+export async function bulkDeleteSessions(sessionIds: string[], userId: string) {
+  if (sessionIds.length === 0) throw new AppError('empty_ids', 'No session IDs provided.', 400);
+  if (sessionIds.length > 50) throw new AppError('too_many_ids', 'Maximum 50 sessions per bulk delete.', 400);
+
+  // Only touch sessions that belong to this user and are not already deleted
+  const { data: owned, error: fetchError } = await supabaseAdmin
+    .from('sessions')
+    .select('id')
+    .in('id', sessionIds)
+    .eq('user_id', userId)
+    .is('deleted_at', null);
+
+  if (fetchError) throw fetchError;
+  if (!owned || owned.length === 0) throw new NotFoundError('Sessions');
+
+  const ownedIds = owned.map((s: any) => s.id as string);
+
+  const { error: updateError } = await supabaseAdmin
+    .from('sessions')
+    .update({ deleted_at: new Date().toISOString() })
+    .in('id', ownedIds)
+    .eq('user_id', userId);
+
+  if (updateError) throw new AppError('delete_failed', 'Failed to delete sessions.', 500);
+
+  return { deleted: ownedIds.length };
+}
+
 export async function resendVerification(sessionId: string, userId: string, userPlan: string) {
   const session = await getSession(sessionId, userId);
 

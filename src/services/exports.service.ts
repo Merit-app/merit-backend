@@ -178,7 +178,10 @@ async function uploadAndSign(buffer: Buffer, path: string): Promise<string> {
 
 // ─── Public functions ─────────────────────────────────────────────────────
 
-export async function exportSessionsPdf(userId: string): Promise<{ url: string }> {
+export async function exportSessionsPdf(
+  userId: string,
+  opts: { from?: string; to?: string; includeSelfReported?: boolean } = {},
+): Promise<{ url: string }> {
   const { data: user } = await supabaseAdmin
     .from('users').select('name, plan').eq('id', userId).maybeSingle();
 
@@ -189,12 +192,24 @@ export async function exportSessionsPdf(userId: string): Promise<{ url: string }
     throw new AppError('plan_required', 'PDF export requires a Pro plan or higher.', 403);
   }
 
-  const { data: sessions } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('sessions')
-    .select('date, hours, status, supervisor_name, verified_by, org:organizations(name)')
-    .eq('user_id', userId).is('deleted_at', null).order('date', { ascending: false });
+    .select('date, hours, status, supervisor_name, supervisor_phone, supervisor_email, verified_by, org:organizations(name)')
+    .eq('user_id', userId)
+    .is('deleted_at', null)
+    .order('date', { ascending: false });
 
-  const rows = (sessions as any[] | null) ?? [];
+  if (opts.from) query = query.gte('date', opts.from);
+  if (opts.to)   query = query.lte('date', opts.to);
+
+  const { data: sessions } = await query;
+  let rows = (sessions as any[] | null) ?? [];
+
+  // Self-reported = no supervisor contact info was provided
+  if (!opts.includeSelfReported) {
+    rows = rows.filter((r: any) => r.supervisor_phone || r.supervisor_email);
+  }
+
   const totalHours = rows.reduce((s: number, r: any) => s + Number(r.hours), 0);
   const verifiedHours = rows.filter((r: any) => r.status === 'verified')
     .reduce((s: number, r: any) => s + Number(r.hours), 0);
@@ -203,7 +218,7 @@ export async function exportSessionsPdf(userId: string): Promise<{ url: string }
   const buffer = await renderToBuffer(element);
   const url = await uploadAndSign(Buffer.from(buffer), `users/${userId}/sessions-${Date.now()}.pdf`);
 
-  logger.info({ userId }, 'sessions_pdf_exported');
+  logger.info({ userId, from: opts.from, to: opts.to, includeSelfReported: opts.includeSelfReported }, 'sessions_pdf_exported');
   return { url };
 }
 

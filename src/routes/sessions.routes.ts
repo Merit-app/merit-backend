@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
@@ -58,6 +59,17 @@ router.patch(
     }
   },
 );
+
+// DELETE /sessions/bulk — soft-delete up to 50 sessions in one call
+router.delete('/sessions/bulk', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) }).parse(req.body);
+    const result = await sessionsService.bulkDeleteSessions(ids, req.user!.id);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
 
 // DELETE /sessions/:id
 router.delete('/sessions/:id', async (req: Request, res: Response, next: NextFunction) => {

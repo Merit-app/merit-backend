@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { updateUserSchema } from '../schemas/users.schema';
@@ -49,6 +50,26 @@ router.post('/users/me/cancel-deletion', async (req: Request, res: Response, nex
   try {
     const result = await usersService.cancelAccountDeletion(req.user!.id);
     res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PATCH /users/me/notifications — update notification preferences (merges with existing)
+router.patch('/users/me/notifications', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const prefs = z
+      .object({
+        smsVerification: z.boolean().optional(),
+        weeklyProgress: z.boolean().optional(),
+        goalMilestones: z.boolean().optional(),
+        productUpdates: z.boolean().optional(),
+        marketingEmails: z.boolean().optional(),
+      })
+      .parse(req.body);
+
+    const notifications = await usersService.updateUserNotifications(req.user!.id, prefs);
+    res.json(success({ notifications }));
   } catch (err) {
     next(err);
   }
