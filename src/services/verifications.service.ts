@@ -35,15 +35,17 @@ export async function sendVerificationSMS(
 
   // 2. Rate limit check
   const max = SMS_LIMITS[user.plan] ?? 3;
+  const today = new Date().toISOString().split('T')[0];
+  let rl: { count: number } | null = null;
   if (max < 999 && SUPABASE_MODE !== 'mock') {
-    const today = new Date().toISOString().split('T')[0];
-    const { data: rl } = await supabaseAdmin
+    const { data } = await supabaseAdmin
       .from('rate_limits')
       .select('count')
       .eq('user_id', user.id)
       .eq('action', 'sms_send')
       .eq('date', today)
       .maybeSingle();
+    rl = data;
 
     if ((rl?.count ?? 0) >= max) {
       throw new AppError('rate_limit_exceeded', `You've used your ${max} daily SMS verifications. Upgrade for more.`, 429, {
@@ -74,10 +76,9 @@ export async function sendVerificationSMS(
 
   // 5. Increment rate limit
   if (SUPABASE_MODE !== 'mock') {
-    const today = new Date().toISOString().split('T')[0];
     await supabaseAdmin
       .from('rate_limits')
-      .upsert({ user_id: user.id, action: 'sms_send', date: today, count: 1 }, {
+      .upsert({ user_id: user.id, action: 'sms_send', date: today, count: (rl?.count ?? 0) + 1 }, {
         onConflict: 'user_id,action,date',
       });
   }
