@@ -15,7 +15,7 @@ router.get(
   ipRateLimit('public_org_page', 120, 1),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = await getPublicOrg(req.params.slug!);
+      const org = await getPublicOrg(req.params.slug as string);
       res.json(success({ org }));
     } catch (err) {
       next(err);

@@ -74,7 +74,7 @@ router.get('/organizations/:id', requireAuth, async (req: Request, res: Response
 // ─── POST /organizations/:id/follow ──────────────────────────────────────────
 router.post('/organizations/:id/follow', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const result = await orgFollowsService.toggleFollow(req.user!.id, req.params.id!);
+    const result = await orgFollowsService.toggleFollow(req.user!.id, req.params.id as string);
     res.json(success(result));
   } catch (err) {
     next(err);
@@ -85,7 +85,7 @@ router.post('/organizations/:id/follow', requireAuth, async (req: Request, res: 
 // Public — no auth required
 router.get('/organizations/:id/stats', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const stats = await orgFollowsService.getOrgStats(req.params.id!);
+    const stats = await orgFollowsService.getOrgStats(req.params.id as string);
     res.json(success(stats));
   } catch (err) {
     next(err);
@@ -96,7 +96,7 @@ router.get('/organizations/:id/stats', async (req: Request, res: Response, next:
 // Public — no auth required
 router.get('/organizations/:id/similar', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const similar = await orgFollowsService.getSimilarOrgs(req.params.id!);
+    const similar = await orgFollowsService.getSimilarOrgs(req.params.id as string);
     res.json(success(similar));
   } catch (err) {
     next(err);

@@ -135,7 +135,7 @@ export async function getPublicOrg(slugOrId: string): Promise<PublicOrgProfile> 
         verifiedHours: volunteerMap.get(u.id)?.verifiedHours ?? 0,
         sessionCount: volunteerMap.get(u.id)?.sessionCount ?? 0,
       }))
-      .sort((a, b) => b.verifiedHours - a.verifiedHours);
+      .sort((a: any, b: any) => b.verifiedHours - a.verifiedHours);
   }
 
   return {

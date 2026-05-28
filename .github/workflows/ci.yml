@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ci:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+
+  smoke:
+    name: Production Smoke Test
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    env:
+      API: https://merit-backend-production.up.railway.app
+
+    steps:
+      - name: Health check
+        run: |
+          echo "→ GET $API/health"
+          curl -f --silent --show-error --max-time 15 "$API/health" | jq .
+          echo "✓ /health OK"
+
+      - name: Smoke — signup
+        id: signup
+        run: |
+          TS=$(date +%s)
+          EMAIL="ci-smoke-${TS}@merit-test.invalid"
+          echo "→ POST $API/auth/signup  email=$EMAIL"
+          BODY=$(curl -f --silent --show-error --max-time 15 \
+            -X POST "$API/auth/signup" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"email\": \"$EMAIL\",
+              \"password\": \"Sm0ke-T3st-${TS}!\",
+              \"name\": \"CI Smoke\",
+              \"dateOfBirth\": \"1999-06-15\",
+              \"school\": \"CI School\"
+            }")
+          echo "$BODY" | jq .
+          TOKEN=$(echo "$BODY" | jq -r '.data.session.accessToken // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "✗ signup response missing accessToken" >&2
+            exit 1
+          fi
+          echo "ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "✓ /auth/signup OK — token acquired"
+
+      - name: Smoke — GET /auth/me
+        run: |
+          echo "→ GET $API/auth/me"
+          curl -f --silent --show-error --max-time 15 \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "$API/auth/me" | jq .
+          echo "✓ /auth/me OK"
+
+      - name: Smoke — GET /stats/dashboard
+        run: |
+          echo "→ GET $API/stats/dashboard"
+          curl -f --silent --show-error --max-time 15 \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "$API/stats/dashboard" | jq .
+          echo "✓ /stats/dashboard OK"
+
+      - name: Smoke — GET /sessions
+        run: |
+          echo "→ GET $API/sessions"
+          curl -f --silent --show-error --max-time 15 \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "$API/sessions" | jq .
+          echo "✓ /sessions OK"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════╗"
+          echo "║  SMOKE TEST FAILED — see step above          ║"
+          echo "║  Check Railway logs: https://railway.app     ║"
+          echo "╚══════════════════════════════════════════════╝"
+          exit 1
