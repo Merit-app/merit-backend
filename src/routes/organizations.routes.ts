@@ -4,11 +4,12 @@ import { requireRole } from '../middleware/role.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { orgSearchSchema, createOrgSchema } from '../schemas/organizations.schema';
 import * as orgsService from '../services/organizations.service';
+import * as orgFollowsService from '../services/org-follows.service';
 import { success } from '../utils/shape';
 
 const router = Router();
 
-// GET /organizations/search?q=...
+// ─── GET /organizations/search ────────────────────────────────────────────────
 router.get(
   '/organizations/search',
   requireAuth,
@@ -23,7 +24,7 @@ router.get(
   },
 );
 
-// GET /organizations/me
+// ─── GET /organizations/me ────────────────────────────────────────────────────
 router.get('/organizations/me', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const orgs = await orgsService.getUserOrganizations(req.user!.id);
@@ -33,7 +34,34 @@ router.get('/organizations/me', requireAuth, async (req: Request, res: Response,
   }
 });
 
-// GET /organizations/:id
+// ─── GET /organizations/following ─────────────────────────────────────────────
+// Must come BEFORE /organizations/:id
+router.get('/organizations/following', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const orgs = await orgFollowsService.getFollowedOrgs(req.user!.id);
+    res.json(success(orgs));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /organizations/discover ──────────────────────────────────────────────
+// Must come BEFORE /organizations/:id
+router.get('/organizations/discover', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const category = typeof req.query.category === 'string' ? req.query.category : undefined;
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const limit = req.query.limit ? Math.min(Number(req.query.limit), 60) : 30;
+    const offset = req.query.offset ? Number(req.query.offset) : 0;
+
+    const orgs = await orgFollowsService.discoverOrgs(req.user!.id, { category, q, limit, offset });
+    res.json(success(orgs));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:id ───────────────────────────────────────────────────
 router.get('/organizations/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const org = await orgsService.getOrganization(req.params.id as string);
@@ -43,7 +71,39 @@ router.get('/organizations/:id', requireAuth, async (req: Request, res: Response
   }
 });
 
-// POST /organizations
+// ─── POST /organizations/:id/follow ──────────────────────────────────────────
+router.post('/organizations/:id/follow', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgFollowsService.toggleFollow(req.user!.id, req.params.id!);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:id/stats ────────────────────────────────────────────
+// Public — no auth required
+router.get('/organizations/:id/stats', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await orgFollowsService.getOrgStats(req.params.id!);
+    res.json(success(stats));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:id/similar ──────────────────────────────────────────
+// Public — no auth required
+router.get('/organizations/:id/similar', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const similar = await orgFollowsService.getSimilarOrgs(req.params.id!);
+    res.json(success(similar));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── POST /organizations ──────────────────────────────────────────────────────
 router.post(
   '/organizations',
   requireAuth,

@@ -16,6 +16,10 @@ export interface PublicOrgProfile {
   city: string | null;
   state: string | null;
   ein: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  logoUrl: string | null;
+  coverUrl: string | null;
   isRegisteredNonprofit: boolean;
   isInstitutionalPartner: boolean;
   claimed: boolean;
@@ -34,36 +38,54 @@ export interface PublicOrgProfile {
   }>;
 }
 
+const ORG_COLUMNS =
+  'id, name, slug, description, website, website_url, category, city, state, ein, ' +
+  'contact_email, contact_phone, logo_url, cover_url, ' +
+  'is_registered_nonprofit, is_institutional_partner, claimed, is_recruiting';
+
+function shapeOrg(org: any): Omit<PublicOrgProfile, 'totalVerifiedHours' | 'totalVerifiedSessions' | 'totalVolunteers' | 'topVolunteers'> {
+  return {
+    id: org.id,
+    name: org.name ?? '',
+    slug: org.slug ?? null,
+    description: org.description ?? null,
+    website: org.website_url ?? org.website ?? null,
+    category: org.category ?? null,
+    city: org.city ?? null,
+    state: org.state ?? null,
+    ein: org.ein ?? null,
+    contactEmail: org.contact_email ?? null,
+    contactPhone: org.contact_phone ?? null,
+    logoUrl: org.logo_url ?? null,
+    coverUrl: org.cover_url ?? null,
+    isRegisteredNonprofit: org.is_registered_nonprofit ?? false,
+    isInstitutionalPartner: org.is_institutional_partner ?? false,
+    claimed: org.claimed ?? false,
+    isRecruiting: org.is_recruiting ?? false,
+  };
+}
+
 /**
  * Look up an org by its `slug` column (added in migration 009).
  * Falls back to UUID id lookup so /orgs/[id] also works during the slug backfill period.
  */
 export async function getPublicOrg(slugOrId: string): Promise<PublicOrgProfile> {
   // Try slug first, then UUID
-  let { data: org, error } = await supabaseAdmin
+  let { data: org } = await supabaseAdmin
     .from('organizations')
-    .select(
-      'id, name, slug, description, website, category, city, state, ein, ' +
-      'is_registered_nonprofit, is_institutional_partner, claimed, is_recruiting',
-    )
+    .select(ORG_COLUMNS)
     .eq('slug', slugOrId)
     .maybeSingle();
 
   if (!org) {
-    // Fallback: try by UUID id
     const res = await supabaseAdmin
       .from('organizations')
-      .select(
-        'id, name, slug, description, website, category, city, state, ein, ' +
-        'is_registered_nonprofit, is_institutional_partner, claimed, is_recruiting',
-      )
+      .select(ORG_COLUMNS)
       .eq('id', slugOrId)
       .maybeSingle();
     org = res.data;
-    error = res.error;
+    if (res.error || !org) throw new NotFoundError('Organization');
   }
-
-  if (error || !org) throw new NotFoundError('Organization');
 
   // Aggregate verified session stats for this org
   const { data: sessionStats } = await supabaseAdmin
@@ -117,20 +139,8 @@ export async function getPublicOrg(slugOrId: string): Promise<PublicOrgProfile> 
   }
 
   return {
-    id: org.id,
-    name: org.name ?? '',
-    slug: org.slug ?? null,
-    description: org.description ?? null,
-    website: org.website ?? null,
-    category: org.category ?? null,
-    city: org.city ?? null,
-    state: org.state ?? null,
-    ein: org.ein ?? null,
-    isRegisteredNonprofit: org.is_registered_nonprofit ?? false,
-    isInstitutionalPartner: org.is_institutional_partner ?? false,
-    claimed: org.claimed ?? false,
-    isRecruiting: org.is_recruiting ?? false,
-    totalVerifiedHours,
+    ...shapeOrg(org),
+    totalVerifiedHours: Math.round(totalVerifiedHours * 10) / 10,
     totalVerifiedSessions,
     totalVolunteers,
     topVolunteers,
