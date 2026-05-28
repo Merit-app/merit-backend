@@ -6,9 +6,29 @@ import { rateLimit } from '../middleware/rate-limit.middleware';
 import { createSessionSchema, updateSessionSchema, sessionQuerySchema } from '../schemas/sessions.schema';
 import * as sessionsService from '../services/sessions.service';
 import { success, paginated } from '../utils/shape';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
+// ─── Public verification endpoint — no auth, registered BEFORE requireAuth ──
+// GET /sessions/verify/:sessionId
+// Anyone with a session ID can look up verification status.
+// Returns only non-sensitive fields (no user_id, email, phone).
+router.get('/sessions/verify/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params.sessionId as string;
+    const data = await sessionsService.getSessionForVerification(sessionId);
+    if (!data) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    return res.json({ data });
+  } catch (err) {
+    logger.error(err, 'verify_session_error');
+    return res.status(500).json({ error: 'Failed to fetch session' });
+  }
+});
+
+// Apply auth middleware to all other /sessions routes
 router.use('/sessions', requireAuth);
 
 // GET /sessions

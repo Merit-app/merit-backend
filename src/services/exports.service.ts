@@ -1,10 +1,13 @@
 import * as React from 'react';
-import { renderToBuffer, Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
+import { renderToBuffer, Document, Page, Text, View, Image, StyleSheet, Font } from '@react-pdf/renderer';
+import QRCode from 'qrcode';
 import { supabaseAdmin } from '../config/supabase';
 import { NotFoundError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { PLAN_LIMITS } from '../config/plans';
 import type { Plan } from '../config/plans';
+
+const VERIFY_BASE_URL = 'https://meritco.app/verify';
 
 // ─── Styles ───────────────────────────────────────────────────────────────
 
@@ -30,7 +33,105 @@ const styles = StyleSheet.create({
   disputed: { fontSize: 8, color: '#dc2626' },
   pending: { fontSize: 8, color: '#71717a' },
   footer: { position: 'absolute', bottom: 24, left: 40, right: 40, textAlign: 'center', fontSize: 7, color: '#a1a1aa' },
+  // Signature block styles
+  sigSection: { marginTop: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  sigLabel: { fontSize: 7, color: '#94a3b8', letterSpacing: 1, marginBottom: 8, fontFamily: 'Helvetica-Bold' },
+  sigRow: { flexDirection: 'row', gap: 16 },
+  sigLeft: { flex: 6 },
+  sigRight: { flex: 4 },
+  sigField: { marginBottom: 12 },
+  sigFieldLabel: { fontSize: 8, color: '#64748b', marginBottom: 2 },
+  sigFieldValue: { fontSize: 9, color: '#1e293b', marginBottom: 2 },
+  sigLine: { borderBottomWidth: 1, borderBottomColor: '#cbd5e1', marginTop: 2, height: 14 },
+  qrBlock: { alignItems: 'center', marginTop: 4 },
+  qrCaption: { fontSize: 6, color: '#94a3b8', textAlign: 'center', marginTop: 3 },
+  qrUrl: { fontSize: 5.5, color: '#94a3b8', textAlign: 'center', marginTop: 1 },
+  sigVerifyText: { fontSize: 6.5, color: '#94a3b8', textAlign: 'center', marginTop: 12 },
 });
+
+// ─── Signature + QR block (appended after each session's row) ─────────────
+
+function SignatureBlock(props: {
+  sessionId: string;
+  supervisorName: string | null;
+  orgName: string | null;
+  qrDataUrl: string;
+}) {
+  const shortId = props.sessionId.slice(0, 8);
+  const verifyUrl = `meritco.app/verify/${props.sessionId}`;
+
+  return React.createElement(
+    View,
+    { style: styles.sigSection },
+    // Section label
+    React.createElement(Text, { style: styles.sigLabel }, 'SUPERVISOR VERIFICATION'),
+    React.createElement(
+      View,
+      { style: styles.sigRow },
+      // ── Left column (60%) ──────────────────────────────────────────
+      React.createElement(
+        View,
+        { style: styles.sigLeft },
+        // Supervisor Name — pre-filled
+        React.createElement(
+          View,
+          { style: styles.sigField },
+          React.createElement(Text, { style: styles.sigFieldLabel }, 'Supervisor Name'),
+          React.createElement(Text, { style: styles.sigFieldValue }, props.supervisorName ?? ''),
+          React.createElement(View, { style: styles.sigLine }),
+        ),
+        // Organization — pre-filled
+        React.createElement(
+          View,
+          { style: styles.sigField },
+          React.createElement(Text, { style: styles.sigFieldLabel }, 'Organization'),
+          React.createElement(Text, { style: styles.sigFieldValue }, props.orgName ?? ''),
+          React.createElement(View, { style: styles.sigLine }),
+        ),
+        // Title/Role — blank for supervisor to fill
+        React.createElement(
+          View,
+          { style: styles.sigField },
+          React.createElement(Text, { style: styles.sigFieldLabel }, 'Title / Role'),
+          React.createElement(View, { style: [styles.sigLine, { marginTop: 10 }] }),
+        ),
+      ),
+      // ── Right column (40%) ─────────────────────────────────────────
+      React.createElement(
+        View,
+        { style: styles.sigRight },
+        // Signature — blank
+        React.createElement(
+          View,
+          { style: styles.sigField },
+          React.createElement(Text, { style: styles.sigFieldLabel }, 'Signature'),
+          React.createElement(View, { style: [styles.sigLine, { marginTop: 28 }] }),
+        ),
+        // Date — blank
+        React.createElement(
+          View,
+          { style: styles.sigField },
+          React.createElement(Text, { style: styles.sigFieldLabel }, 'Date'),
+          React.createElement(View, { style: [styles.sigLine, { marginTop: 10 }] }),
+        ),
+        // QR Code
+        React.createElement(
+          View,
+          { style: styles.qrBlock },
+          React.createElement(Image, { src: props.qrDataUrl, style: { width: 60, height: 60 } }),
+          React.createElement(Text, { style: styles.qrCaption }, 'Scan to verify'),
+          React.createElement(Text, { style: styles.qrUrl }, verifyUrl),
+        ),
+      ),
+    ),
+    // Full-width verification URL below
+    React.createElement(
+      Text,
+      { style: styles.sigVerifyText },
+      `This document can be independently verified at ${verifyUrl}`,
+    ),
+  );
+}
 
 // ─── Sessions PDF ─────────────────────────────────────────────────────────
 
@@ -40,6 +141,7 @@ function SessionsPdf(props: {
   totalHours: number;
   verifiedHours: number;
   freeTier?: boolean;
+  qrCodes: Record<string, string>;
 }) {
   return React.createElement(
     Document,
@@ -80,17 +182,33 @@ function SessionsPdf(props: {
         React.createElement(Text, { style: [styles.tableHeaderCell, { width: 55 }] }, 'STATUS'),
         React.createElement(Text, { style: [styles.tableHeaderCell, { flex: 1 }] }, 'VERIFIED BY'),
       ),
-      // Rows
-      ...props.sessions.map((s: any, i: number) => {
+      // Session rows + signature blocks
+      ...props.sessions.flatMap((s: any, i: number) => {
         const st = s.status === 'verified' ? 'Verified' : s.status === 'disputed' ? 'Disputed' : 'Pending';
         const stStyle = s.status === 'verified' ? styles.verified : s.status === 'disputed' ? styles.disputed : styles.pending;
-        return React.createElement(View, { key: i, style: styles.tableRow },
+        const orgName = s.org?.name ?? '';
+        const qrDataUrl = props.qrCodes[s.id];
+
+        const row = React.createElement(View, { key: `row-${i}`, style: styles.tableRow },
           React.createElement(Text, { style: [styles.cell, { width: 60 }] }, s.date ?? ''),
-          React.createElement(Text, { style: [styles.cell, { flex: 1 }] }, s.org?.name ?? ''),
+          React.createElement(Text, { style: [styles.cell, { flex: 1 }] }, orgName),
           React.createElement(Text, { style: [styles.cell, { width: 35 }] }, Number(s.hours).toFixed(1)),
           React.createElement(Text, { style: [stStyle, { width: 55 }] }, st),
           React.createElement(Text, { style: [styles.cell, { flex: 1 }] }, s.verified_by ?? s.supervisor_name ?? ''),
         );
+
+        // Only add signature block if we have a QR code for this session
+        if (!qrDataUrl) return [row];
+
+        const sig = React.createElement(SignatureBlock, {
+          key: `sig-${i}`,
+          sessionId: s.id,
+          supervisorName: s.supervisor_name ?? null,
+          orgName,
+          qrDataUrl,
+        });
+
+        return [row, sig];
       }),
       React.createElement(
         Text,
@@ -185,6 +303,27 @@ async function uploadAndSign(buffer: Buffer, path: string): Promise<string> {
   return (signed as any)?.signedUrl ?? `mock://exports/${path}`;
 }
 
+// ─── QR code generation ───────────────────────────────────────────────────
+
+async function generateQRCodes(sessions: any[]): Promise<Record<string, string>> {
+  const qrCodes: Record<string, string> = {};
+  await Promise.all(
+    sessions.map(async (s) => {
+      try {
+        const url = `${VERIFY_BASE_URL}/${s.id}`;
+        qrCodes[s.id] = await QRCode.toDataURL(url, {
+          width: 80,
+          margin: 1,
+          color: { dark: '#0F172A', light: '#FFFFFF' },
+        });
+      } catch (err) {
+        logger.warn({ sessionId: s.id, err }, 'qr_code_generation_failed');
+      }
+    }),
+  );
+  return qrCodes;
+}
+
 // ─── Public functions ─────────────────────────────────────────────────────
 
 export async function exportSessionsPdf(
@@ -216,7 +355,7 @@ export async function exportSessionsPdf(
 
   let query = supabaseAdmin
     .from('sessions')
-    .select('date, hours, status, supervisor_name, supervisor_phone, supervisor_email, verified_by, org:organizations(name)')
+    .select('id, date, hours, status, supervisor_name, supervisor_phone, supervisor_email, verified_by, org:organizations(name)')
     .eq('user_id', userId)
     .is('deleted_at', null)
     .order('date', { ascending: false });
@@ -236,12 +375,16 @@ export async function exportSessionsPdf(
   const verifiedHours = rows.filter((r: any) => r.status === 'verified')
     .reduce((s: number, r: any) => s + Number(r.hours), 0);
 
+  // Generate QR codes for all sessions
+  const qrCodes = await generateQRCodes(rows);
+
   const element = SessionsPdf({
     userName: u.name,
     sessions: rows,
     totalHours,
     verifiedHours,
     freeTier: isFreeTier,
+    qrCodes,
   });
   const buffer = await renderToBuffer(element);
   const url = await uploadAndSign(Buffer.from(buffer), `users/${userId}/sessions-${Date.now()}.pdf`);

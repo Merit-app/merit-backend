@@ -306,3 +306,56 @@ export async function resendVerification(sessionId: string, userId: string, user
   logger.info({ sessionId, userId }, 'verification_resent');
   return { queued: true };
 }
+
+// ─── Public verification lookup (no auth — limited fields) ────────────────
+
+export async function getSessionForVerification(sessionId: string) {
+  const { data: session, error } = await supabaseAdmin
+    .from('sessions')
+    .select(`
+      id,
+      date,
+      hours,
+      activity,
+      status,
+      verified_at,
+      created_at,
+      supervisor_name,
+      users!sessions_user_id_fkey (
+        name,
+        school,
+        grade
+      ),
+      organizations!sessions_org_id_fkey (
+        name,
+        city,
+        category
+      )
+    `)
+    .eq('id', sessionId)
+    .is('deleted_at', null)
+    .single();
+
+  if (error || !session) return null;
+
+  const s = session as any;
+  return {
+    id: s.id,
+    date: s.date,
+    hours: s.hours,
+    activity: s.activity,
+    status: s.status,
+    verifiedAt: s.verified_at,
+    supervisorName: s.supervisor_name,
+    student: {
+      name: s.users?.name ?? null,
+      school: s.users?.school ?? null,
+      grade: s.users?.grade ?? null,
+    },
+    organization: {
+      name: s.organizations?.name ?? null,
+      city: s.organizations?.city ?? null,
+      category: s.organizations?.category ?? null,
+    },
+  };
+}
