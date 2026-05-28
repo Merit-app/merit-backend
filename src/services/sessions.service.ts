@@ -238,8 +238,43 @@ export async function resendVerification(sessionId: string, userId: string, user
       .eq('session_id', sessionId);
   }
 
-  logger.info({ sessionId, userId }, 'verification_resent');
-  // Actual sending wired in Step 17
+  // Fetch sender's name for the verification message
+  const { data: userData } = await supabaseAdmin
+    .from('users')
+    .select('name')
+    .eq('id', userId)
+    .single();
 
+  const userForSend = { id: userId, name: userData?.name ?? 'Student', plan: userPlan };
+
+  // Send via queue (if available) or direct fire-and-forget
+  const supervisorPhone = session.supervisor_phone;
+  const supervisorEmail = session.supervisor_email;
+
+  if (supervisorPhone) {
+    if (smsQueue) {
+      await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForSend });
+      logger.info({ sessionId, phone: supervisorPhone }, 'resend_sms_queued');
+    } else {
+      logger.warn({ sessionId }, 'sms_queue_unavailable_sending_direct');
+      sendVerificationSMS(session, userForSend).catch((err: any) =>
+        logger.error({ sessionId, err: err.message }, 'resend_sms_direct_send_failed'),
+      );
+    }
+  }
+
+  if (supervisorEmail) {
+    if (smsQueue) {
+      await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForSend });
+      logger.info({ sessionId, email: supervisorEmail }, 'resend_email_queued');
+    } else {
+      logger.warn({ sessionId }, 'email_queue_unavailable_sending_direct');
+      sendVerificationEmail(session, userForSend).catch((err: any) =>
+        logger.error({ sessionId, err: err.message }, 'resend_email_direct_send_failed'),
+      );
+    }
+  }
+
+  logger.info({ sessionId, userId }, 'verification_resent');
   return { queued: true };
 }
