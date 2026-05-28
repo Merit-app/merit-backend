@@ -7,6 +7,7 @@ import { calculateFraudScore } from './fraud.service';
 import { resolveOrCreateOrg } from './organizations.service';
 import { trackEvent } from './analytics.service';
 import { smsQueue } from '../queues/index';
+import { sendVerificationSMS, sendVerificationEmail } from './verifications.service';
 import type { CreateSessionInput, UpdateSessionInput } from '../schemas/sessions.schema';
 
 const RESEND_LIMITS: Record<string, number> = { free: 2, pro: 5, premium: 999, institutional: 999 };
@@ -118,16 +119,37 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     throw new AppError('create_failed', 'Failed to create session.', 500);
   }
 
-  // 6. Queue verifications
+  // 6. Queue or send verifications
+  // When Redis/BullMQ is available: jobs are queued for reliable async delivery.
+  // When Redis is unavailable (REDIS_URL not set): send directly as fire-and-forget
+  // so verification always fires regardless of queue infrastructure.
   if (fraudScore < 0.9) {
     const userForQueue = { id: userId, name: userName, plan: userPlan };
-    if (supervisorPhone && smsQueue) {
-      await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForQueue });
-      logger.info({ sessionId: session.id, phone: supervisorPhone }, 'sms_verification_queued');
+
+    if (supervisorPhone) {
+      if (smsQueue) {
+        await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForQueue });
+        logger.info({ sessionId: session.id, phone: supervisorPhone }, 'sms_verification_queued');
+      } else {
+        // Direct send — no Redis configured
+        logger.warn({ sessionId: session.id }, 'sms_queue_unavailable_sending_direct');
+        sendVerificationSMS(session, userForQueue).catch((err: any) =>
+          logger.error({ sessionId: session.id, err: err.message }, 'sms_direct_send_failed'),
+        );
+      }
     }
-    if (supervisorEmail && smsQueue) {
-      await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForQueue });
-      logger.info({ sessionId: session.id, email: supervisorEmail }, 'email_verification_queued');
+
+    if (supervisorEmail) {
+      if (smsQueue) {
+        await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForQueue });
+        logger.info({ sessionId: session.id, email: supervisorEmail }, 'email_verification_queued');
+      } else {
+        // Direct send — no Redis configured
+        logger.warn({ sessionId: session.id }, 'email_queue_unavailable_sending_direct');
+        sendVerificationEmail(session, userForQueue).catch((err: any) =>
+          logger.error({ sessionId: session.id, err: err.message }, 'email_direct_send_failed'),
+        );
+      }
     }
   } else {
     logger.warn({ sessionId: session.id, fraudScore, fraudFlags }, 'verification_skipped_high_fraud');
