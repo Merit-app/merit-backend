@@ -9,11 +9,12 @@ const router = Router();
 
 router.use('/exports', requireAuth);
 
-// POST /exports/pdf  — plan-gated to pro+
+// POST /exports/pdf
+// All plans can export. Free plan: service enforces 30-day lookback + watermark.
+// Pro/Premium: full history, no watermark.
 // Body: { from?: string (YYYY-MM-DD), to?: string (YYYY-MM-DD), includeSelfReported?: boolean }
 router.post(
   '/exports/pdf',
-  requireFeature('export_pdf'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const opts = z
@@ -35,6 +36,7 @@ router.post(
 // GET /exports/grant-report/pdf?from=YYYY-MM-DD&to=YYYY-MM-DD  — institutional only
 router.get(
   '/exports/grant-report/pdf',
+  requireFeature('grant_report'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const query = z

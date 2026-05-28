@@ -2,56 +2,70 @@ export type Plan = 'free' | 'pro' | 'premium' | 'institutional';
 
 export const PLANS: Plan[] = ['free', 'pro', 'premium', 'institutional'];
 
+/** Plan hierarchy for minimum-plan comparisons (higher = more features). */
+export const PLAN_HIERARCHY: Record<Plan, number> = {
+  free: 0,
+  pro: 1,
+  premium: 2,
+  institutional: 3,
+};
+
+/** Returns true if userPlan meets or exceeds requiredPlan. */
+export function meetsMinimum(userPlan: Plan, requiredPlan: Plan): boolean {
+  return (PLAN_HIERARCHY[userPlan] ?? 0) >= (PLAN_HIERARCHY[requiredPlan] ?? 0);
+}
+
 export const PLAN_FEATURES: Record<string, Plan[]> = {
-  // Core
-  basic_profile: ['free', 'pro', 'premium', 'institutional'],
-  endorsements: ['free', 'pro', 'premium', 'institutional'],
-  references: ['free', 'pro', 'premium', 'institutional'],
+  // ── Core — all plans ───────────────────────────────────────────────
+  log_sessions:        ['free', 'pro', 'premium', 'institutional'],
+  sms_verification:    ['free', 'pro', 'premium', 'institutional'],
+  public_profile:      ['free', 'pro', 'premium', 'institutional'],
+  badges:              ['free', 'pro', 'premium', 'institutional'],
+  org_follow:          ['free', 'pro', 'premium', 'institutional'],
+  /** PDF export is available to all plans; service enforces date/watermark limits. */
+  export_pdf:          ['free', 'pro', 'premium', 'institutional'],
 
-  // Pro+
-  advanced_search: ['pro', 'premium', 'institutional'],
-  export_pdf: ['pro', 'premium', 'institutional'],
-  bulk_endorsements: ['pro', 'premium', 'institutional'],
-  analytics_basic: ['pro', 'premium', 'institutional'],
+  // ── Pro+ ──────────────────────────────────────────────────────────
+  export_csv:          ['pro', 'premium', 'institutional'],
+  unlimited_orgs:      ['pro', 'premium', 'institutional'],
+  /** Full-history PDF with no date restriction and no free-tier watermark. */
+  full_history_pdf:    ['pro', 'premium', 'institutional'],
 
-  // Premium+
-  analytics_advanced: ['premium', 'institutional'],
-  api_access: ['premium', 'institutional'],
-  custom_branding: ['premium', 'institutional'],
-  priority_support: ['premium', 'institutional'],
-  trust_score_details: ['premium', 'institutional'],
+  // ── Premium+ ──────────────────────────────────────────────────────
+  custom_pdf_brand:    ['premium', 'institutional'],
+  api_access:          ['premium', 'institutional'],
+  analytics_advanced:  ['premium', 'institutional'],
 
-  // Institutional only
-  team_management: ['institutional'],
-  sso: ['institutional'],
-  audit_logs: ['institutional'],
-  unlimited_seats: ['institutional'],
-  dedicated_support: ['institutional'],
+  // ── Institutional only ────────────────────────────────────────────
+  grant_report:        ['institutional'],
+  admin_dashboard:     ['institutional'],
+  org_claim:           ['institutional'],
 };
 
 export const PLAN_LIMITS: Record<Plan, Record<string, number>> = {
   free: {
-    endorsements_per_day: 5,
-    references_per_month: 3,
-    search_per_day: 20,
-    storage_mb: 100,
+    sms_per_day:           5,
+    orgs_max:              5,
+    /** Free users can only export sessions from the last N days (0 = unlimited). */
+    pdf_lookback_days:     30,
+    sessions_max:          999,
   },
   pro: {
-    endorsements_per_day: 50,
-    references_per_month: 25,
-    search_per_day: 200,
-    storage_mb: 1000,
+    sms_per_day:           15,
+    orgs_max:              999,
+    pdf_lookback_days:     0,
+    sessions_max:          999,
   },
   premium: {
-    endorsements_per_day: 500,
-    references_per_month: 100,
-    search_per_day: 2000,
-    storage_mb: 10000,
+    sms_per_day:           999,
+    orgs_max:              999,
+    pdf_lookback_days:     0,
+    sessions_max:          999,
   },
   institutional: {
-    endorsements_per_day: 99999,
-    references_per_month: 99999,
-    search_per_day: 99999,
-    storage_mb: 99999,
+    sms_per_day:           999,
+    orgs_max:              999,
+    pdf_lookback_days:     0,
+    sessions_max:          999,
   },
 };

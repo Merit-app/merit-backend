@@ -107,15 +107,18 @@ export async function getSubscription(userId: string) {
 
   const u = user as any;
 
-  // Try to pull richer subscription data from subscriptions table (may not exist yet)
-  let stripeSubscriptionId: string | null = null;
-  let status: string = u.plan === 'free' ? 'free' : 'active';
-  let periodEnd: string | null = null;
+  // Pull richer subscription data from users row (post-migration-011) and
+  // subscriptions table as fallback / source of additional fields.
+  let stripeSubscriptionId: string | null = (u as any).stripe_subscription_id ?? null;
+  let status: string = (u as any).subscription_status ?? (u.plan === 'free' ? 'free' : 'active');
+  let currentPeriodEnd: string | null = (u as any).subscription_period_end ?? null;
+  let cancelAtPeriodEnd = false;
+  let paymentMethod: { brand: string; last4: string; expMonth: number; expYear: number } | null = null;
 
   try {
     const { data: sub } = await supabaseAdmin
       .from('subscriptions')
-      .select('stripe_subscription_id, status, current_period_end')
+      .select('stripe_subscription_id, status, current_period_end, cancel_at_period_end')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -123,9 +126,10 @@ export async function getSubscription(userId: string) {
 
     if (sub) {
       const s = sub as any;
-      stripeSubscriptionId = s.stripe_subscription_id ?? null;
+      stripeSubscriptionId = stripeSubscriptionId ?? s.stripe_subscription_id ?? null;
       status = s.status ?? status;
-      periodEnd = s.current_period_end ?? null;
+      currentPeriodEnd = currentPeriodEnd ?? s.current_period_end ?? null;
+      cancelAtPeriodEnd = s.cancel_at_period_end ?? false;
     }
   } catch {
     // subscriptions table may not exist — degrade gracefully
@@ -136,33 +140,51 @@ export async function getSubscription(userId: string) {
     stripeCustomerId: u.stripe_customer_id ?? null,
     stripeSubscriptionId,
     status,
-    periodEnd,
+    currentPeriodEnd,
+    cancelAtPeriodEnd,
+    paymentMethod,
   };
 }
 
 // ─── Cancel subscription ──────────────────────────────────────────────────
 
 export async function cancelSubscription(userId: string) {
+  // Prefer users.stripe_subscription_id (populated after migration 011),
+  // fall back to the subscriptions table for existing records.
   const { data: user } = await supabaseAdmin
     .from('users')
     .select('stripe_subscription_id')
     .eq('id', userId)
     .maybeSingle();
 
-  const u = user as any;
-  if (!u?.stripe_subscription_id) {
+  let subscriptionId: string | null = (user as any)?.stripe_subscription_id ?? null;
+
+  if (!subscriptionId) {
+    // Fallback: look up the most recent active subscription row
+    const { data: sub } = await supabaseAdmin
+      .from('subscriptions')
+      .select('stripe_subscription_id')
+      .eq('user_id', userId)
+      .in('status', ['active', 'trialing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    subscriptionId = (sub as any)?.stripe_subscription_id ?? null;
+  }
+
+  if (!subscriptionId) {
     throw new AppError('no_subscription', 'No active subscription found.', 404);
   }
 
-  // Cancel at period end rather than immediately
-  await stripe.subscriptions.cancel(u.stripe_subscription_id);
+  // Cancel at period end so user retains access until billing period expires
+  await (stripe.subscriptions as any).update(subscriptionId, { cancel_at_period_end: true });
 
   await supabaseAdmin
     .from('users')
     .update({ subscription_status: 'canceling' })
     .eq('id', userId);
 
-  logger.info({ userId, subscriptionId: u.stripe_subscription_id }, 'subscription_canceled');
+  logger.info({ userId, subscriptionId }, 'subscription_cancel_scheduled');
   return { canceled: true };
 }
 
@@ -174,6 +196,7 @@ export async function syncSubscription(
   status: string,
   priceId: string | null,
   periodEnd: number | null,
+  cancelAtPeriodEnd: boolean = false,
 ) {
   const { data: user } = await supabaseAdmin
     .from('users')
@@ -187,20 +210,64 @@ export async function syncSubscription(
   }
 
   const u = user as any;
-  const plan: Plan = (priceId && planFromPriceId(priceId)) || 'free';
-  const activePlan: Plan = status === 'active' || status === 'trialing' ? plan : 'free';
+  // The tier mapped from the price (null for deletions)
+  const mappedPlan: Plan | null = priceId ? planFromPriceId(priceId) : null;
+  // Active plan: keep tier if active/trialing, otherwise drop to free
+  const activePlan: Plan = (status === 'active' || status === 'trialing') && mappedPlan
+    ? mappedPlan
+    : 'free';
 
+  const periodEndIso = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+
+  // 1 — Update users table (requires migration 011 for the new columns)
   await supabaseAdmin
     .from('users')
     .update({
       plan: activePlan,
       stripe_subscription_id: stripeSubscriptionId,
       subscription_status: status,
-      subscription_period_end: periodEnd
-        ? new Date(periodEnd * 1000).toISOString()
-        : null,
+      subscription_period_end: periodEndIso,
     })
     .eq('id', u.id);
 
-  logger.info({ userId: u.id, plan: activePlan, status }, 'subscription_synced');
+  // 2 — Upsert the subscriptions table for richer billing history
+  try {
+    if (mappedPlan) {
+      // Active/trialing subscription — full upsert
+      await supabaseAdmin
+        .from('subscriptions')
+        .upsert(
+          {
+            user_id: u.id,
+            stripe_subscription_id: stripeSubscriptionId,
+            stripe_customer_id: stripeCustomerId,
+            stripe_price_id: priceId!,
+            plan: mappedPlan,
+            status,
+            current_period_end: periodEndIso,
+            cancel_at_period_end: cancelAtPeriodEnd,
+            canceled_at: status === 'canceled' ? new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'stripe_subscription_id' },
+        );
+    } else if (status === 'canceled') {
+      // Deletion event — update status on the existing row (no valid plan to upsert)
+      await supabaseAdmin
+        .from('subscriptions')
+        .update({ status: 'canceled', canceled_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('stripe_subscription_id', stripeSubscriptionId);
+    } else if (status === 'past_due') {
+      // Payment failed — mark past_due without clearing the plan tier
+      await supabaseAdmin
+        .from('subscriptions')
+        .update({ status: 'past_due', updated_at: new Date().toISOString() })
+        .eq('stripe_subscription_id', stripeSubscriptionId);
+    }
+  } catch (err) {
+    // subscriptions table write failure is non-fatal — user plan is already updated
+    logger.warn({ err, stripeSubscriptionId }, 'subscriptions_table_sync_failed');
+  }
+
+  logger.info({ userId: u.id, plan: activePlan, status, cancelAtPeriodEnd }, 'subscription_synced');
 }

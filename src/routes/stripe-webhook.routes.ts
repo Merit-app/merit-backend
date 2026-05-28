@@ -33,10 +33,11 @@ router.post(
     }
 
     // Idempotency — skip events already processed
+    // stripe_events PK is `id` which stores the Stripe event ID directly
     const { data: existing } = await supabaseAdmin
       .from('stripe_events')
       .select('id')
-      .eq('stripe_event_id', event.id)
+      .eq('id', event.id)
       .maybeSingle();
 
     if (existing) {
@@ -48,7 +49,7 @@ router.post(
     // Record event before processing to prevent duplicate side-effects
     await supabaseAdmin
       .from('stripe_events')
-      .insert({ stripe_event_id: event.id, type: event.type, processed_at: new Date().toISOString() });
+      .insert({ id: event.id, type: event.type, processed_at: new Date().toISOString(), data: event.data });
 
     try {
       await handleStripeEvent(event);
@@ -67,7 +68,29 @@ async function handleStripeEvent(event: any): Promise<void> {
 
   switch (type) {
     case 'checkout.session.completed': {
-      // subscription is created; subscription.updated fires after, so we just log here
+      // Eagerly sync the subscription so plan upgrades land immediately.
+      // customer.subscription.created fires shortly after, but this ensures
+      // the plan is set even if that event arrives out of order or is delayed.
+      const subscriptionId: string | null = obj.subscription ?? null;
+      if (subscriptionId) {
+        try {
+          // Expand the live subscription from Stripe for accurate status + period
+          const sub = await (stripe.subscriptions as any).retrieve(subscriptionId);
+          const priceId: string | null = sub?.items?.data?.[0]?.price?.id ?? obj.metadata?.priceId ?? null;
+          await syncSubscription(
+            subscriptionId,
+            obj.customer,
+            sub?.status ?? 'active',
+            priceId,
+            sub?.current_period_end ?? null,
+            sub?.cancel_at_period_end ?? false,
+          );
+        } catch (err) {
+          // In mock/test mode the subscription may not be retrievable — safe to skip,
+          // customer.subscription.created will handle it.
+          logger.warn({ err: (err as any)?.message, sessionId: obj.id }, 'checkout_subscription_expand_failed');
+        }
+      }
       logger.info({ sessionId: obj.id, customerId: obj.customer }, 'checkout_completed');
       break;
     }
@@ -81,12 +104,13 @@ async function handleStripeEvent(event: any): Promise<void> {
         obj.status,
         priceId,
         obj.current_period_end ?? null,
+        obj.cancel_at_period_end ?? false,
       );
       break;
     }
 
     case 'customer.subscription.deleted': {
-      await syncSubscription(obj.id, obj.customer, 'canceled', null, null);
+      await syncSubscription(obj.id, obj.customer, 'canceled', null, null, false);
       break;
     }
 
@@ -99,9 +123,11 @@ async function handleStripeEvent(event: any): Promise<void> {
     case 'invoice.payment_failed': {
       logger.warn({ invoiceId: obj.id, customerId: obj.customer }, 'invoice_payment_failed');
 
-      // Mark subscription as past_due
+      // Mark subscription as past_due — preserve the price so the plan isn't cleared
       if (obj.subscription) {
-        await syncSubscription(obj.subscription, obj.customer, 'past_due', null, null);
+        const lineItem = obj.lines?.data?.[0];
+        const priceId: string | null = lineItem?.price?.id ?? null;
+        await syncSubscription(obj.subscription, obj.customer, 'past_due', priceId, null, false);
       }
       break;
     }
