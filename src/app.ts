@@ -60,6 +60,7 @@ import exportsRouter from './routes/exports.routes';
 import profilesRouter from './routes/profiles.routes';
 import onboardingRouter from './routes/onboarding.routes';
 import publicOrgsRouter from './routes/public-orgs.routes';
+import orgClaimsRouter from './routes/org-claims.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -76,6 +77,7 @@ app.use('/', exportsRouter);
 app.use('/', profilesRouter);
 app.use('/', onboardingRouter);
 app.use('/', publicOrgsRouter);
+app.use('/', orgClaimsRouter);
 
 // 404 & error handling
 app.use(notFound);

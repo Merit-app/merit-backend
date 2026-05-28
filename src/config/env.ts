@@ -68,6 +68,7 @@ const envSchema = z.preprocess(coerceEmptyStrings, z.object({
   FRONTEND_URL: z.string().url().optional(),
   APP_NAME: z.string().default('Merit'),
   API_BASE_URL: z.string().url().optional(),
+  ADMIN_EMAIL: z.string().email().optional(),
 
   // External APIs
   PROPUBLICA_API_BASE: z.string().url().optional(),
