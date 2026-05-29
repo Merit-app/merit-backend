@@ -311,11 +311,15 @@ async function generateQRCodes(sessions: any[]): Promise<Record<string, string>>
     sessions.map(async (s) => {
       try {
         const url = `${VERIFY_BASE_URL}/${s.id}`;
-        qrCodes[s.id] = await QRCode.toDataURL(url, {
-          width: 80,
+        // Use toBuffer → explicit base64 data URI so @react-pdf/renderer
+        // always receives a PNG (toDataURL can return SVG in some Node envs)
+        const buffer = await QRCode.toBuffer(url, {
+          width: 120,
           margin: 1,
           color: { dark: '#0F172A', light: '#FFFFFF' },
         });
+        const base64 = (buffer as Buffer).toString('base64');
+        qrCodes[s.id] = `data:image/png;base64,${base64}`;
       } catch (err) {
         logger.warn({ sessionId: s.id, err }, 'qr_code_generation_failed');
       }
