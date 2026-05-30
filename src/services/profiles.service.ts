@@ -218,6 +218,61 @@ export async function getProfileOrgs(username: string) {
     .slice(0, 10);
 }
 
+// ─── Avatar upload ────────────────────────────────────────────────────────
+
+const ALLOWED_AVATAR_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+export async function uploadAvatar(
+  userId: string,
+  base64Data: string,
+  contentType: string,
+): Promise<string> {
+  const ext = ALLOWED_AVATAR_TYPES[contentType];
+  if (!ext) {
+    throw new AppError('invalid_file_type', 'Only JPEG, PNG, WebP and GIF images are allowed.', 400);
+  }
+
+  // Strip data-URL prefix if present
+  const raw = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+  const buffer = Buffer.from(raw, 'base64');
+
+  if (buffer.length > 5 * 1024 * 1024) {
+    throw new AppError('file_too_large', 'Image must be under 5 MB.', 400);
+  }
+
+  const path = `${userId}/avatar.${ext}`;
+
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from('avatars')
+    .upload(path, buffer, { contentType, upsert: true });
+
+  if (uploadError) {
+    logger.error({ userId, uploadError }, 'avatar_upload_failed');
+    throw new AppError('upload_failed', 'Failed to upload avatar. Please try again.', 500);
+  }
+
+  const { data: urlData } = supabaseAdmin.storage.from('avatars').getPublicUrl(path);
+  const publicUrl = urlData.publicUrl;
+
+  const { error: updateError } = await supabaseAdmin
+    .from('users')
+    .update({ avatar_url: publicUrl })
+    .eq('id', userId);
+
+  if (updateError) {
+    logger.error({ userId, updateError }, 'avatar_url_update_failed');
+    throw new AppError('update_failed', 'Avatar uploaded but failed to save.', 500);
+  }
+
+  // Cache-bust so the browser loads the new image
+  return `${publicUrl}?t=${Date.now()}`;
+}
+
 // ─── Username availability ────────────────────────────────────────────────
 
 export async function checkUsernameAvailable(

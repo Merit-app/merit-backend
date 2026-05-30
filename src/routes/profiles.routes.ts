@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { AppError } from '../lib/errors';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { rateLimit, ipRateLimit } from '../middleware/rate-limit.middleware';
@@ -20,6 +21,25 @@ router.get(
     try {
       const profile = await profilesService.getMyProfile(req.user!.id);
       res.json(success({ profile }));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /profiles/me/avatar — must come before PATCH /profiles/me
+router.post(
+  '/profiles/me/avatar',
+  requireAuth,
+  rateLimit('avatar_upload', { max: 5, windowHours: 1 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { image, contentType } = req.body as { image?: string; contentType?: string };
+      if (!image || !contentType) {
+        throw new AppError('invalid_request', 'image and contentType are required.', 400);
+      }
+      const avatarUrl = await profilesService.uploadAvatar(req.user!.id, image, contentType);
+      res.json(success({ avatarUrl }));
     } catch (err) {
       next(err);
     }

@@ -44,3 +44,42 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     next(err);
   }
 }
+
+/**
+ * Like requireAuth but non-fatal — attaches user to req if token is present
+ * and valid, otherwise just calls next() without error. Used on public routes
+ * that optionally personalise the response for logged-in users.
+ */
+export async function optionalAuth(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ') || SUPABASE_MODE === 'mock') {
+      return next();
+    }
+
+    const token = authHeader.slice(7);
+    const { data, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !data.user) return next();
+
+    const { data: appUser } = await supabaseAdmin
+      .from('users')
+      .select('id, email, name, role, plan')
+      .eq('id', data.user.id)
+      .single();
+
+    if (appUser) {
+      req.authUser = { id: data.user.id, email: data.user.email };
+      req.user = {
+        id: appUser.id,
+        email: appUser.email,
+        name: appUser.name ?? '',
+        role: appUser.role,
+        plan: appUser.plan,
+      };
+    }
+
+    next();
+  } catch {
+    next(); // Non-fatal — proceed without user
+  }
+}

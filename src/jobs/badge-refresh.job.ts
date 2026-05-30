@@ -1,5 +1,6 @@
 import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
 import { computeBadgesForUser } from '../services/badges.service';
+import { computeLeaderboardBadges } from '../services/leaderboard.service';
 import { logger } from '../lib/logger';
 
 /**
@@ -50,4 +51,11 @@ export async function refreshAllBadges(): Promise<void> {
   }
 
   logger.info({ totalUsers, totalEarned, errors }, 'badge_refresh_completed');
+
+  // Recompute leaderboard badges (top-3 global + monthly) after all user badges settle
+  try {
+    await computeLeaderboardBadges();
+  } catch (err) {
+    logger.error({ err }, 'leaderboard_badge_computation_error');
+  }
 }

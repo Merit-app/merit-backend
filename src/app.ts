@@ -39,6 +39,9 @@ app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 import stripeWebhookRouter from './routes/stripe-webhook.routes';
 app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWebhookRouter);
 
+// Avatar upload needs a higher body size limit — must come before the global 1 MB parser
+app.use('/profiles/me/avatar', express.json({ limit: '10mb' }));
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(requestId);
@@ -61,6 +64,7 @@ import profilesRouter from './routes/profiles.routes';
 import onboardingRouter from './routes/onboarding.routes';
 import publicOrgsRouter from './routes/public-orgs.routes';
 import orgClaimsRouter from './routes/org-claims.routes';
+import leaderboardRouter from './routes/leaderboard.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -78,6 +82,7 @@ app.use('/', profilesRouter);
 app.use('/', onboardingRouter);
 app.use('/', publicOrgsRouter);
 app.use('/', orgClaimsRouter);
+app.use('/', leaderboardRouter);
 
 // 404 & error handling
 app.use(notFound);
