@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role.middleware';
 import { validate } from '../middleware/validate.middleware';
-import { orgSearchSchema, createOrgSchema } from '../schemas/organizations.schema';
+import { orgSearchSchema, createOrgSchema, createPublicOrgSchema, updateOrgSchema } from '../schemas/organizations.schema';
 import * as orgsService from '../services/organizations.service';
 import * as orgFollowsService from '../services/org-follows.service';
 import { success } from '../utils/shape';
@@ -61,11 +61,43 @@ router.get('/organizations/discover', requireAuth, async (req: Request, res: Res
   }
 });
 
+// ─── GET /organizations/admin/mine ────────────────────────────────────────────
+// Must come BEFORE /organizations/:id so "admin" isn't matched as an orgId
+router.get('/organizations/admin/mine', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const orgs = await orgsService.getAdminOrgs(req.user!.id);
+    res.json(success(orgs));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── GET /organizations/:id ───────────────────────────────────────────────────
 router.get('/organizations/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const org = await orgsService.getOrganization(req.params.id as string);
     res.json(success({ org }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:id/dashboard ────────────────────────────────────────
+router.get('/organizations/:id/dashboard', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await orgsService.getOrgDashboard(req.params.id as string, req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── PATCH /organizations/:id ─────────────────────────────────────────────────
+router.patch('/organizations/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = updateOrgSchema.parse(req.body);
+    const result = await orgsService.updateOrg(req.params.id as string, req.user!.id, parsed);
+    res.json(success(result));
   } catch (err) {
     next(err);
   }
@@ -104,16 +136,19 @@ router.get('/organizations/:id/similar', async (req: Request, res: Response, nex
 });
 
 // ─── POST /organizations ──────────────────────────────────────────────────────
+// Any authenticated user can create an org — they become the owner/admin
 router.post(
   '/organizations',
   requireAuth,
-  requireRole('coordinator', 'admin'),
-  validate(createOrgSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const org = await orgsService.createOrganization(req.body, req.user!.id, req.user!.role);
+      const parsed = createPublicOrgSchema.parse(req.body);
+      const org = await orgsService.createOrgByUser(parsed, req.user!.id, req.user!.email ?? '');
       res.status(201).json(success({ org }));
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid org data', details: err.errors });
+      }
       next(err);
     }
   },

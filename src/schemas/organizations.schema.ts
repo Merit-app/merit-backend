@@ -14,5 +14,30 @@ export const createOrgSchema = z.object({
   ein: z.string().optional(),
 });
 
+// Schema for user-facing org creation (any authenticated user)
+export const createPublicOrgSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').max(100),
+  category: z.string().min(1, 'Category is required').max(50),
+  city: z.string().min(2, 'City is required').max(100),
+  province: z.string().max(50).optional(),
+  country: z.string().default('Canada'),
+  websiteUrl: z.string().url().optional().or(z.literal('')),
+  description: z.string().max(500).optional(),
+  contactEmail: z.string().email().optional().or(z.literal('')),
+  contactPhone: z.string().max(20).optional(),
+  isRecruiting: z.boolean().default(false),
+});
+
+// Schema for org admins updating their org
+export const updateOrgSchema = z.object({
+  description: z.string().max(500).optional(),
+  websiteUrl: z.string().url().optional().or(z.literal('')),
+  contactEmail: z.string().email().optional().or(z.literal('')),
+  contactPhone: z.string().max(20).optional(),
+  isRecruiting: z.boolean().optional(),
+});
+
 export type OrgSearchInput = z.infer<typeof orgSearchSchema>;
 export type CreateOrgInput = z.infer<typeof createOrgSchema>;
+export type CreatePublicOrgInput = z.infer<typeof createPublicOrgSchema>;
+export type UpdateOrgInput = z.infer<typeof updateOrgSchema>;

@@ -2,7 +2,13 @@ import { supabaseAdmin } from '../config/supabase';
 import { NotFoundError, ForbiddenError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import * as propublica from './propublica.service';
-import type { CreateOrgInput } from '../schemas/organizations.schema';
+import type { CreateOrgInput, CreatePublicOrgInput, UpdateOrgInput } from '../schemas/organizations.schema';
+
+/** Strip any HTML tags from user-provided strings */
+function sanitize(s?: string): string | undefined {
+  if (!s) return undefined;
+  return s.trim().replace(/<[^>]*>/g, '').slice(0, 1000);
+}
 
 export async function searchOrganizations(q: string, limit = 10) {
   // 1. Search local cache first (trigram + full-text)
@@ -165,6 +171,145 @@ export async function resolveOrCreateOrg(input: {
     .single();
 
   return inserted!.id;
+}
+
+/** Create a brand-new org and make the creator its owner/admin */
+export async function createOrgByUser(
+  input: CreatePublicOrgInput,
+  userId: string,
+  userEmail: string,
+) {
+  const slugify = (await import('slugify')).default;
+  const { nanoid } = await import('nanoid');
+
+  const baseSlug = slugify(input.name, { lower: true, strict: true });
+  const slug = `${baseSlug}-${nanoid(6)}`;
+
+  const { data: org, error: orgError } = await supabaseAdmin
+    .from('organizations')
+    .insert({
+      name: sanitize(input.name),
+      category: input.category,
+      city: sanitize(input.city),
+      state: input.province ?? null,
+      country: input.country,
+      slug,
+      website_url: input.websiteUrl || null,
+      description: sanitize(input.description),
+      contact_email: input.contactEmail || null,
+      contact_phone: input.contactPhone || null,
+      is_recruiting: input.isRecruiting,
+      claimed: true,
+      claimed_at: new Date().toISOString(),
+      org_plan: 'free',
+    })
+    .select('id, name, slug, category, city')
+    .single();
+
+  if (orgError || !org) {
+    logger.error({ orgError, userId }, 'create_org_failed');
+    throw new Error('Failed to create organization');
+  }
+
+  // Auto-approve creator as owner
+  await supabaseAdmin.from('org_admins').insert({
+    org_id: org.id,
+    user_id: userId,
+    role: 'owner',
+    role_label: 'Owner / Executive Director',
+  });
+
+  // Audit trail via org_claims
+  await supabaseAdmin.from('org_claims').insert({
+    org_id: org.id,
+    user_id: userId,
+    email: userEmail,
+    role: 'owner',
+    role_label: 'Owner / Executive Director',
+    status: 'approved',
+    domain_matched: true,
+  });
+
+  logger.info({ orgId: org.id, userId }, 'org_created');
+  return org;
+}
+
+/** Get all orgs that the current user is an admin of */
+export async function getAdminOrgs(userId: string) {
+  const { data } = await supabaseAdmin
+    .from('org_admins')
+    .select('role, organizations(id, name, slug, category, city, claimed)')
+    .eq('user_id', userId);
+
+  return (data ?? []).map((row: any) => ({
+    ...(row.organizations ?? {}),
+    userRole: row.role,
+  })).filter((o: any) => o.id);
+}
+
+/** Full dashboard data for an org, verified admin only */
+export async function getOrgDashboard(orgId: string, userId: string) {
+  // Verify admin
+  const { data: adminRecord } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
+
+  const [{ data: org }, { data: sessions }, { data: admins }] = await Promise.all([
+    supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
+    supabaseAdmin
+      .from('sessions')
+      .select('id, date, hours, status, activity, users!sessions_user_id_fkey(name, school, grade)')
+      .eq('org_id', orgId)
+      .is('deleted_at', null)
+      .order('date', { ascending: false })
+      .limit(50),
+    supabaseAdmin
+      .from('org_admins')
+      .select('role, users!org_admins_user_id_fkey(name, email)')
+      .eq('org_id', orgId),
+  ]);
+
+  const sessionList = sessions ?? [];
+  const totalHours = sessionList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
+  const uniqueStudents = new Set(sessionList.map((s: any) => s.users?.name).filter(Boolean)).size;
+  const verifiedSessions = sessionList.filter((s: any) => s.status === 'verified').length;
+  const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
+
+  return {
+    org,
+    stats: { totalStudents: uniqueStudents, totalHours, totalSessions: sessionList.length, verifiedSessions, pendingSessions },
+    recentSessions: sessionList.slice(0, 20),
+    admins: admins ?? [],
+    userRole: adminRecord.role,
+  };
+}
+
+/** Update editable org fields — admin only */
+export async function updateOrg(orgId: string, userId: string, input: UpdateOrgInput) {
+  const { data: adminRecord } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
+
+  const patch: Record<string, unknown> = {};
+  if (input.description !== undefined) patch.description = sanitize(input.description);
+  if (input.websiteUrl !== undefined) patch.website_url = input.websiteUrl || null;
+  if (input.contactEmail !== undefined) patch.contact_email = input.contactEmail || null;
+  if (input.contactPhone !== undefined) patch.contact_phone = input.contactPhone || null;
+  if (input.isRecruiting !== undefined) patch.is_recruiting = input.isRecruiting;
+
+  const { error } = await supabaseAdmin.from('organizations').update(patch).eq('id', orgId);
+  if (error) throw error;
+  return { updated: true };
 }
 
 function shapeOrgResult(org: any) {
