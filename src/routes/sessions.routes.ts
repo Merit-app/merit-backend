@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
+import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import { createSessionSchema, updateSessionSchema, sessionQuerySchema } from '../schemas/sessions.schema';
 import * as sessionsService from '../services/sessions.service';
 import { success, paginated } from '../utils/shape';
@@ -14,7 +15,7 @@ const router = Router();
 // GET /sessions/verify/:sessionId
 // Anyone with a session ID can look up verification status.
 // Returns only non-sensitive fields (no user_id, email, phone).
-router.get('/sessions/verify/:sessionId', async (req: Request, res: Response) => {
+router.get('/sessions/verify/:sessionId', validateUuidParam('sessionId'), async (req: Request, res: Response) => {
   try {
     const sessionId = req.params.sessionId as string;
     const data = await sessionsService.getSessionForVerification(sessionId);
@@ -43,7 +44,7 @@ router.get('/sessions', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // GET /sessions/:id
-router.get('/sessions/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/sessions/:id', validateUuidParam('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const session = await sessionsService.getSession(req.params.id as string, req.user!.id);
     res.json(success({ session }));
@@ -69,6 +70,7 @@ router.post(
 // PATCH /sessions/:id
 router.patch(
   '/sessions/:id',
+  validateUuidParam('id'),
   validate(updateSessionSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -92,7 +94,7 @@ router.delete('/sessions/bulk', async (req: Request, res: Response, next: NextFu
 });
 
 // DELETE /sessions/:id
-router.delete('/sessions/:id', async (req: Request, res: Response, next: NextFunction) => {
+router.delete('/sessions/:id', validateUuidParam('id'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await sessionsService.deleteSession(req.params.id as string, req.user!.id);
     res.json(success(result));
@@ -104,6 +106,7 @@ router.delete('/sessions/:id', async (req: Request, res: Response, next: NextFun
 // POST /sessions/:id/resend-verification
 router.post(
   '/sessions/:id/resend-verification',
+  validateUuidParam('id'),
   rateLimit('resend_verification', { max: 10 }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

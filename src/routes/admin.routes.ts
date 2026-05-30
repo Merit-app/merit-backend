@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
+import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import { z } from 'zod';
 import * as adminService from '../services/admin.service';
 import { success } from '../utils/shape';
@@ -63,6 +64,7 @@ router.get('/admin/members', async (req: Request, res: Response, next: NextFunct
 // DELETE /admin/members/:memberId
 router.delete(
   '/admin/members/:memberId',
+  validateUuidParam('memberId'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const data = await adminService.removeMember(req.user!.id, req.params.memberId as string);
@@ -88,6 +90,7 @@ router.get('/admin/coordinators', async (req: Request, res: Response, next: Next
 // DELETE /admin/coordinators/:userId
 router.delete(
   '/admin/coordinators/:userId',
+  validateUuidParam('userId'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const data = await adminService.removeCoordinator(
@@ -137,6 +140,7 @@ router.post(
 // DELETE /admin/whitelist/:entryId
 router.delete(
   '/admin/whitelist/:entryId',
+  validateUuidParam('entryId'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const data = await adminService.removeFromWhitelist(
@@ -181,6 +185,7 @@ router.post(
 // DELETE /admin/invites/:inviteId
 router.delete(
   '/admin/invites/:inviteId',
+  validateUuidParam('inviteId'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const data = await adminService.revokeInvite(req.user!.id, req.params.inviteId as string);

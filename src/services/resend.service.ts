@@ -38,10 +38,15 @@ export async function sendEmail(opts: SendEmailOpts): Promise<void> {
     });
 
     if (RESEND_MODE === 'real') {
-      logger.info({ to: opts.to, subject: opts.subject, id: (result as any)?.data?.id }, 'email_sent');
+      // Mask recipient PII — log only domain(s), not full addresses
+      const maskTo = (addr: string | string[]) =>
+        Array.isArray(addr)
+          ? addr.map((a) => a.split('@')[1] ?? 'unknown')
+          : (addr.split('@')[1] ?? 'unknown');
+      logger.info({ to_domain: maskTo(opts.to), id: (result as any)?.data?.id }, 'email_sent');
     }
   } catch (err) {
-    logger.error({ err, to: opts.to, subject: opts.subject }, 'email_send_failed');
+    logger.error({ err: (err as any)?.message }, 'email_send_failed');
     // Don't throw — email failures should not break the request flow
   }
 }

@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
-import { RateLimitError } from '../lib/errors';
+import { AppError, RateLimitError } from '../lib/errors';
+
+/** Fail-closed sentinel — returned instead of next() when the rate-limit DB is unreachable. */
+function rateLimitUnavailable(next: NextFunction) {
+  return next(new AppError('service_unavailable', 'Rate-limit service temporarily unavailable.', 503));
+}
 
 export function rateLimit(action: string, limits: { max: number; windowHours?: number }) {
   return async (req: Request, _res: Response, next: NextFunction) => {
@@ -17,7 +22,8 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
         .gte('window_start', windowStart)
         .maybeSingle();
 
-      if (error) return next();
+      // Fail closed — if we can't check the limit, refuse the request
+      if (error) return rateLimitUnavailable(next);
 
       const currentCount = data?.count ?? 0;
       if (currentCount >= limits.max) {
@@ -26,7 +32,8 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
 
       next();
     } catch {
-      next();
+      // Fail closed
+      return rateLimitUnavailable(next);
     }
   };
 }
@@ -46,7 +53,8 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
         .gte('window_start', windowStart)
         .maybeSingle();
 
-      if (error) return next();
+      // Fail closed — if we can't check the limit, refuse the request
+      if (error) return rateLimitUnavailable(next);
 
       const currentCount = data?.count ?? 0;
       if (currentCount >= max) {
@@ -55,7 +63,8 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
 
       next();
     } catch {
-      next();
+      // Fail closed
+      return rateLimitUnavailable(next);
     }
   };
 }

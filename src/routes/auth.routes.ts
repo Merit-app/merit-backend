@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { validate } from '../middleware/validate.middleware';
 import { requireAuth } from '../middleware/auth.middleware';
 import { ipRateLimit } from '../middleware/rate-limit.middleware';
+import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
 import {
   signupSchema,
   loginSchema,
@@ -51,8 +52,18 @@ router.post(
 router.post(
   '/auth/logout',
   requireAuth,
-  async (_req: Request, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Revoke all server-side sessions for this user (best-effort — don't surface errors)
+      if (SUPABASE_MODE !== 'mock') {
+        const authHeader = req.headers.authorization;
+        const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        if (accessToken) {
+          await (supabaseAdmin.auth.admin as any)
+            .signOut?.(accessToken, 'global')
+            .catch(() => { /* non-fatal */ });
+        }
+      }
       res.json(success({ loggedOut: true }));
     } catch (err) {
       next(err);
@@ -63,6 +74,7 @@ router.post(
 // POST /auth/refresh
 router.post(
   '/auth/refresh',
+  ipRateLimit('token_refresh', 30, 1),
   validate(refreshSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -93,6 +105,7 @@ router.post(
 // POST /auth/reset-password
 router.post(
   '/auth/reset-password',
+  ipRateLimit('password_reset_submit', 5, 1),
   validate(resetPasswordSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

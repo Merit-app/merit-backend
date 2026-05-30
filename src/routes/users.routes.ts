@@ -85,4 +85,20 @@ router.get('/users/me/export', async (req: Request, res: Response, next: NextFun
   }
 });
 
+// POST /users/internal/purge-expired
+// Internal-only endpoint — requires x-purge-secret header matching PURGE_SECRET env var.
+// Called by a scheduled cron job to hard-delete accounts past their 30-day grace period.
+router.post('/users/internal/purge-expired', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const secret = process.env.PURGE_SECRET;
+    if (!secret || req.headers['x-purge-secret'] !== secret) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    const result = await usersService.purgeExpiredAccounts();
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

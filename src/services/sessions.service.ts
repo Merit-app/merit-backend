@@ -1,7 +1,13 @@
+import DOMPurify from 'isomorphic-dompurify';
 import { supabaseAdmin } from '../config/supabase';
 import { AppError, NotFoundError, ForbiddenError } from '../lib/errors';
 import { normalizePhone } from '../lib/phone';
 import { logger } from '../lib/logger';
+
+/** Strip all HTML/script tags from free-text fields before storing. */
+function sanitizeText(input: string): string {
+  return DOMPurify.sanitize(input, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+}
 import { resolveOrCreateAuthenticator } from './trust.service';
 import { calculateFraudScore } from './fraud.service';
 import { resolveOrCreateOrg } from './organizations.service';
@@ -102,8 +108,8 @@ export async function createSession(userId: string, input: CreateSessionInput, u
       org_id: orgId,
       date: input.date,
       hours: input.hours,
-      activity: input.activity,
-      supervisor_name: input.supervisorName,
+      activity: sanitizeText(input.activity),
+      supervisor_name: sanitizeText(input.supervisorName),
       supervisor_phone: supervisorPhone ?? null,
       supervisor_email: supervisorEmail ?? null,
       authenticator_id: authenticator?.id ?? null,
@@ -129,7 +135,7 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     if (supervisorPhone) {
       if (smsQueue) {
         await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForQueue });
-        logger.info({ sessionId: session.id, phone: supervisorPhone }, 'sms_verification_queued');
+        logger.info({ sessionId: session.id, phone_suffix: supervisorPhone.slice(-4) }, 'sms_verification_queued');
       } else {
         // Direct send — no Redis configured
         logger.warn({ sessionId: session.id }, 'sms_queue_unavailable_sending_direct');
@@ -142,7 +148,7 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     if (supervisorEmail) {
       if (smsQueue) {
         await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForQueue });
-        logger.info({ sessionId: session.id, email: supervisorEmail }, 'email_verification_queued');
+        logger.info({ sessionId: session.id, email_domain: supervisorEmail.split('@')[1] }, 'email_verification_queued');
       } else {
         // Direct send — no Redis configured
         logger.warn({ sessionId: session.id }, 'email_queue_unavailable_sending_direct');
@@ -168,8 +174,8 @@ export async function updateSession(sessionId: string, userId: string, input: Up
   }
 
   const updates: Record<string, any> = {};
-  if (input.activity) updates.activity = input.activity;
-  if (input.supervisorName) updates.supervisor_name = input.supervisorName;
+  if (input.activity) updates.activity = sanitizeText(input.activity);
+  if (input.supervisorName) updates.supervisor_name = sanitizeText(input.supervisorName);
   if (input.supervisorPhone !== undefined) {
     const normalized = input.supervisorPhone ? normalizePhone(input.supervisorPhone) : null;
     if (input.supervisorPhone && !normalized) throw new AppError('invalid_phone', 'Phone number is not valid.', 400);
@@ -282,7 +288,7 @@ export async function resendVerification(sessionId: string, userId: string, user
   if (supervisorPhone) {
     if (smsQueue) {
       await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForSend });
-      logger.info({ sessionId, phone: supervisorPhone }, 'resend_sms_queued');
+      logger.info({ sessionId, phone_suffix: supervisorPhone.slice(-4) }, 'resend_sms_queued');
     } else {
       logger.warn({ sessionId }, 'sms_queue_unavailable_sending_direct');
       sendVerificationSMS(session, userForSend).catch((err: any) =>
@@ -294,7 +300,7 @@ export async function resendVerification(sessionId: string, userId: string, user
   if (supervisorEmail) {
     if (smsQueue) {
       await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForSend });
-      logger.info({ sessionId, email: supervisorEmail }, 'resend_email_queued');
+      logger.info({ sessionId, email_domain: supervisorEmail.split('@')[1] }, 'resend_email_queued');
     } else {
       logger.warn({ sessionId }, 'email_queue_unavailable_sending_direct');
       sendVerificationEmail(session, userForSend).catch((err: any) =>

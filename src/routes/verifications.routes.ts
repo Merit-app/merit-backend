@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
+import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import { confirmMagicLinkSchema } from '../schemas/verifications.schema';
 import * as verificationsService from '../services/verifications.service';
 import { success } from '../utils/shape';
@@ -11,6 +12,7 @@ const router = Router();
 router.get(
   '/verifications/:sessionId',
   requireAuth,
+  validateUuidParam('sessionId'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const verifications = await verificationsService.getSessionVerifications(

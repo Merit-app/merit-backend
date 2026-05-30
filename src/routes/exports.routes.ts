@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requireFeature } from '../middleware/plan-gate.middleware';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 import { z } from 'zod';
 import * as exportsService from '../services/exports.service';
 import { success } from '../utils/shape';
@@ -10,11 +11,17 @@ const router = Router();
 router.use('/exports', requireAuth);
 
 // POST /exports/pdf
-// All plans can export. Free plan: service enforces 30-day lookback + watermark.
-// Pro/Premium: full history, no watermark.
+// All plans can export. Free plan: 10 exports/hr + 30-day lookback + watermark.
+// Pro/Premium: 60 exports/hr, full history, no watermark.
 // Body: { from?: string (YYYY-MM-DD), to?: string (YYYY-MM-DD), includeSelfReported?: boolean }
 router.post(
   '/exports/pdf',
+  async (req: Request, res: Response, next: NextFunction) => {
+    // Plan-aware rate limit: applied before the handler
+    const plan = req.user?.plan ?? 'free';
+    const max = plan === 'pro' || plan === 'premium' ? 60 : 10;
+    return rateLimit('pdf_export', { max, windowHours: 1 })(req, res, next);
+  },
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const opts = z

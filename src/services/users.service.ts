@@ -1,7 +1,13 @@
+import DOMPurify from 'isomorphic-dompurify';
 import { supabaseAdmin } from '../config/supabase';
 import { AppError, NotFoundError } from '../lib/errors';
 import { normalizePhone } from '../lib/phone';
 import { logger } from '../lib/logger';
+
+/** Strip all HTML/script tags from free-text user-supplied fields. */
+function sanitizeText(input: string): string {
+  return DOMPurify.sanitize(input, { ALLOWED_TAGS: [], ALLOWED_ATTR: [] });
+}
 import { sendAccountDeletionEmail } from './resend.service';
 import { trackEvent } from './analytics.service';
 import { env } from '../config/env';
@@ -22,8 +28,8 @@ export async function getUser(userId: string) {
 export async function updateUser(userId: string, input: UpdateUserInput) {
   const updates: Record<string, any> = {};
 
-  if (input.name !== undefined) updates.name = input.name;
-  if (input.school !== undefined) updates.school = input.school;
+  if (input.name !== undefined) updates.name = input.name ? sanitizeText(input.name) : input.name;
+  if (input.school !== undefined) updates.school = input.school ? sanitizeText(input.school) : input.school;
   if (input.grade !== undefined) updates.grade = input.grade;
   if (input.graduationYear !== undefined) updates.graduation_year = input.graduationYear;
   if (input.goalProgram !== undefined) {
@@ -176,6 +182,58 @@ export async function updateUserNotifications(
 
   if (error || !data) throw new AppError('update_failed', 'Failed to update notification preferences.', 500);
   return data.notifications;
+}
+
+/**
+ * Hard-deletes all data for a user whose scheduled deletion date has passed.
+ * Explicitly deletes child rows in dependency order before removing the user and
+ * auth record, so FK constraints are satisfied regardless of CASCADE config.
+ */
+export async function purgeExpiredAccounts(): Promise<{ purged: string[]; errors: Record<string, string> }> {
+  const { data: expiredUsers } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .not('deletion_scheduled_for', 'is', null)
+    .lt('deletion_scheduled_for', new Date().toISOString());
+
+  const purged: string[] = [];
+  const errors: Record<string, string> = {};
+
+  for (const user of expiredUsers ?? []) {
+    try {
+      // 1. Get session IDs so we can delete their verifications first
+      const { data: sessions } = await supabaseAdmin
+        .from('sessions')
+        .select('id')
+        .eq('user_id', user.id);
+      const sessionIds = (sessions ?? []).map((s: any) => s.id as string);
+
+      // 2. Explicit child-table deletes in dependency order
+      if (sessionIds.length > 0) {
+        await supabaseAdmin.from('verifications').delete().in('session_id', sessionIds);
+      }
+      await supabaseAdmin.from('sessions').delete().eq('user_id', user.id);
+      await supabaseAdmin.from('notifications').delete().eq('user_id', user.id);
+      await supabaseAdmin.from('audit_log').delete().eq('user_id', user.id);
+      await supabaseAdmin.from('subscriptions').delete().eq('user_id', user.id);
+      await supabaseAdmin.from('rate_limits').delete().eq('user_id', user.id);
+
+      // 3. Delete Supabase auth user (this will also cascade the users row if FK is set)
+      await supabaseAdmin.auth.admin.deleteUser(user.id);
+
+      // 4. Delete app users row (in case FK isn't CASCADE)
+      await supabaseAdmin.from('users').delete().eq('id', user.id);
+
+      purged.push(user.id);
+      logger.info({ userId: user.id }, 'account_purged');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors[user.id] = msg;
+      logger.error({ userId: user.id, err: msg }, 'account_purge_failed');
+    }
+  }
+
+  return { purged, errors };
 }
 
 export async function exportUserData(userId: string) {

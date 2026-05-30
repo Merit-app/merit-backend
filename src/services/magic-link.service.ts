@@ -46,7 +46,7 @@ export async function sendSupervisorMagicLink(supervisorEmail: string) {
     dashUrl,
   });
 
-  logger.info({ supervisorEmail }, 'supervisor_magic_link_sent');
+  logger.info({ email_domain: supervisorEmail.split('@')[1] }, 'supervisor_magic_link_sent');
   return { sent: true };
 }
 
