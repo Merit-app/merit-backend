@@ -8,6 +8,7 @@ interface SessionRow {
   date: string;
   org_id?: string;
   org?: unknown;
+  self_reported?: boolean;
 }
 
 // ─── Dashboard summary ────────────────────────────────────────────────────
@@ -15,7 +16,7 @@ interface SessionRow {
 export async function getDashboardStats(userId: string) {
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
-    .select('id, hours, status, verification_tier, date, org_id')
+    .select('id, hours, status, verification_tier, date, org_id, self_reported')
     .eq('user_id', userId)
     .is('deleted_at', null);
 
@@ -23,11 +24,14 @@ export async function getDashboardStats(userId: string) {
 
   const totalHours = all.reduce((sum, s) => sum + Number(s.hours), 0);
   const verifiedHours = all
-    .filter((s) => s.status === 'verified')
+    .filter((s) => s.status === 'verified' && !s.self_reported)
+    .reduce((sum, s) => sum + Number(s.hours), 0);
+  const selfReportedHours = all
+    .filter((s) => s.self_reported)
     .reduce((sum, s) => sum + Number(s.hours), 0);
   const pendingCount = all.filter((s) => s.status === 'pending').length;
   const disputedCount = all.filter((s) => s.status === 'disputed').length;
-  const verifiedCount = all.filter((s) => s.status === 'verified').length;
+  const verifiedCount = all.filter((s) => s.status === 'verified' && !s.self_reported).length;
   const uniqueOrgs = new Set(all.map((s) => s.org_id)).size;
 
   const institutionalHours = all
@@ -40,6 +44,7 @@ export async function getDashboardStats(userId: string) {
   return {
     totalHours,
     verifiedHours,
+    selfReportedHours,
     pendingCount,
     disputedCount,
     verifiedCount,

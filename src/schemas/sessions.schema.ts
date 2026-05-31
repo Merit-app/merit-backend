@@ -13,12 +13,17 @@ export const createSessionSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
   hours: z.number().min(0.5).max(12),
   activity: z.string().min(1).max(500),
-  supervisorName: z.string().min(1).max(100),
+  supervisorName: z.string().min(1).max(100).optional(),
   supervisorPhone: z.string().optional().nullable(),
   supervisorEmail: z.string().email().optional().nullable(),
+  selfReported: z.boolean().default(false),
+  trackerNote: z.string().max(200).optional(),
 }).refine((d) => d.orgId || d.newOrg, {
   message: 'Must provide orgId or newOrg',
-}).refine((d) => d.supervisorPhone || d.supervisorEmail, {
+}).refine((d) => d.selfReported || d.supervisorName, {
+  message: 'Must provide supervisor name',
+  path: ['supervisorName'],
+}).refine((d) => d.selfReported || d.supervisorPhone || d.supervisorEmail, {
   message: 'Must provide supervisorPhone or supervisorEmail',
 });
 

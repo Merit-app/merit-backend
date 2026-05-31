@@ -70,6 +70,42 @@ export async function getSession(sessionId: string, userId: string) {
 }
 
 export async function createSession(userId: string, input: CreateSessionInput, userPlan: string, userName = 'Student') {
+  // ── Self-reported (tracker) path ──────────────────────────────────────────
+  if (input.selfReported) {
+    const orgId = await resolveOrCreateOrg({ orgId: input.orgId ?? undefined, newOrg: input.newOrg });
+
+    const { data: session, error } = await supabaseAdmin
+      .from('sessions')
+      .insert({
+        user_id: userId,
+        org_id: orgId,
+        date: input.date,
+        hours: input.hours,
+        activity: sanitizeText(input.activity),
+        supervisor_name: 'Self-tracked',
+        supervisor_phone: null,
+        supervisor_email: null,
+        status: 'verified',
+        self_reported: true,
+        tracker_note: input.trackerNote ? sanitizeText(input.trackerNote) : null,
+        fraud_score: 0,
+        fraud_flags: [],
+      })
+      .select('*, org:organizations(id, name), authenticator:authenticators(id, name, tier)')
+      .single();
+
+    if (error || !session) {
+      logger.error({ error, userId }, 'self_reported_session_create_failed');
+      throw new AppError('create_failed', 'Failed to create session.', 500);
+    }
+
+    trackEvent(userId, 'session_created', { orgId, hours: input.hours, selfReported: true });
+    logger.info({ sessionId: session.id, userId }, 'self_reported_session_created');
+    return session;
+  }
+
+  // ── Normal (verified) path ────────────────────────────────────────────────
+
   // 1. Normalize contact info
   let supervisorPhone: string | undefined;
   if (input.supervisorPhone) {
@@ -84,7 +120,7 @@ export async function createSession(userId: string, input: CreateSessionInput, u
 
   // 3. Resolve or create authenticator
   const authenticator = await resolveOrCreateAuthenticator({
-    name: input.supervisorName,
+    name: input.supervisorName ?? '',
     email: supervisorEmail,
     phone: supervisorPhone,
     orgId,
@@ -109,11 +145,12 @@ export async function createSession(userId: string, input: CreateSessionInput, u
       date: input.date,
       hours: input.hours,
       activity: sanitizeText(input.activity),
-      supervisor_name: sanitizeText(input.supervisorName),
+      supervisor_name: sanitizeText(input.supervisorName ?? ''),
       supervisor_phone: supervisorPhone ?? null,
       supervisor_email: supervisorEmail ?? null,
       authenticator_id: authenticator?.id ?? null,
       status: 'pending',
+      self_reported: false,
       fraud_score: fraudScore,
       fraud_flags: fraudFlags,
     })

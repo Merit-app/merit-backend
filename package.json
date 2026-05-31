@@ -35,7 +35,6 @@
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@types/supertest": "^7.2.0",
-    "typescript": "^5.7.3",
     "@zxcvbn-ts/core": "^3.0.4",
     "@zxcvbn-ts/language-common": "^3.0.4",
     "bullmq": "^5.76.10",
@@ -46,6 +45,7 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.10.1",
     "isomorphic-dompurify": "^2.19.0",
+    "json2csv": "^6.0.0-alpha.2",
     "libphonenumber-js": "^1.13.2",
     "morgan": "^1.10.1",
     "nanoid": "^3.3.7",
@@ -61,10 +61,12 @@
     "stripe": "^22.1.1",
     "ts-node-dev": "^2.0.0",
     "twilio": "^6.0.2",
+    "typescript": "^5.7.3",
     "undici": "^8.3.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/json2csv": "^5.0.7",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
     "@typescript-eslint/parser": "^8.59.4",
     "@vitest/coverage-v8": "^4.1.6",

@@ -72,6 +72,102 @@ router.get('/organizations/admin/mine', requireAuth, async (req: Request, res: R
   }
 });
 
+// ─── GET /organizations/:orgId/volunteers ─────────────────────────────────────
+router.get('/organizations/:orgId/volunteers', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const volunteers = await orgsService.getOrgVolunteers(req.params.orgId as string, req.user!.id);
+    res.json(success({ volunteers }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── POST /organizations/:orgId/sessions/:sessionId/verify ────────────────────
+router.post('/organizations/:orgId/sessions/:sessionId/verify', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.verifySessionAsOrg(
+      req.params.orgId as string,
+      req.params.sessionId as string,
+      req.user!.id,
+    );
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── POST /organizations/:orgId/sessions/:sessionId/dispute ───────────────────
+router.post('/organizations/:orgId/sessions/:sessionId/dispute', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.disputeSessionAsOrg(
+      req.params.orgId as string,
+      req.params.sessionId as string,
+      req.user!.id,
+    );
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── POST /organizations/:orgId/team/invite ───────────────────────────────────
+router.post('/organizations/:orgId/team/invite', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, role } = req.body as { email?: string; role?: string };
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'email is required' });
+    }
+    const validRole = role === 'admin' ? 'admin' : 'coordinator';
+    const result = await orgsService.inviteTeamMember(
+      req.params.orgId as string,
+      req.user!.id,
+      email,
+      validRole as 'coordinator' | 'admin',
+    );
+    res.status(201).json(success(result));
+  } catch (err: any) {
+    if (err?.message === 'NO_ACCOUNT') {
+      return res.status(404).json({ error: 'No Merit account found with that email. They need to sign up first.' });
+    }
+    if (err?.message === 'ALREADY_MEMBER') {
+      return res.status(409).json({ error: 'Already a team member' });
+    }
+    next(err);
+  }
+});
+
+// ─── DELETE /organizations/:orgId/team/:userId ────────────────────────────────
+router.delete('/organizations/:orgId/team/:userId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.removeTeamMember(
+      req.params.orgId as string,
+      req.user!.id,
+      req.params.userId as string,
+    );
+    res.json(success(result));
+  } catch (err: any) {
+    if (err?.message === 'SELF_REMOVE') {
+      return res.status(400).json({ error: 'Cannot remove yourself' });
+    }
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:orgId/export ─────────────────────────────────────────
+router.get('/organizations/:orgId/export', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { csv, filename } = await orgsService.exportVolunteerCSV(
+      req.params.orgId as string,
+      req.user!.id,
+    );
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── GET /organizations/:id ───────────────────────────────────────────────────
 router.get('/organizations/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {

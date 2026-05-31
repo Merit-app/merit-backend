@@ -312,6 +312,194 @@ export async function updateOrg(orgId: string, userId: string, input: UpdateOrgI
   return { updated: true };
 }
 
+// ─── Org admin helper ─────────────────────────────────────────────────────────
+
+async function requireOrgAdmin(orgId: string, userId: string): Promise<string> {
+  const { data } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!data) throw new ForbiddenError('Not an admin of this organization');
+  return data.role as string;
+}
+
+// ─── Volunteers list ──────────────────────────────────────────────────────────
+
+export async function getOrgVolunteers(orgId: string, userId: string) {
+  await requireOrgAdmin(orgId, userId);
+
+  const { data: sessions } = await supabaseAdmin
+    .from('sessions')
+    .select('id, date, hours, status, activity, users!sessions_user_id_fkey(id, name, school, grade, username, avatar_url)')
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .order('date', { ascending: false });
+
+  // Group by student
+  const studentMap = new Map<string, {
+    student: any;
+    sessions: any[];
+    totalHours: number;
+    verifiedHours: number;
+    lastActive: string;
+  }>();
+
+  for (const s of sessions ?? []) {
+    const user = (s as any).users;
+    if (!user?.id) continue;
+    const existing = studentMap.get(user.id);
+    if (existing) {
+      existing.sessions.push(s);
+      existing.totalHours += Number((s as any).hours ?? 0);
+      if ((s as any).status === 'verified') existing.verifiedHours += Number((s as any).hours ?? 0);
+      if ((s as any).date > existing.lastActive) existing.lastActive = (s as any).date;
+    } else {
+      studentMap.set(user.id, {
+        student: user,
+        sessions: [s],
+        totalHours: Number((s as any).hours ?? 0),
+        verifiedHours: (s as any).status === 'verified' ? Number((s as any).hours ?? 0) : 0,
+        lastActive: (s as any).date,
+      });
+    }
+  }
+
+  return Array.from(studentMap.values())
+    .sort((a, b) => b.verifiedHours - a.verifiedHours);
+}
+
+// ─── Verify / dispute session as org ─────────────────────────────────────────
+
+export async function verifySessionAsOrg(orgId: string, sessionId: string, userId: string) {
+  await requireOrgAdmin(orgId, userId);
+  const { error } = await supabaseAdmin
+    .from('sessions')
+    .update({
+      status: 'verified',
+      org_verified_by_user_id: userId,
+      org_verified_at: new Date().toISOString(),
+    })
+    .eq('id', sessionId)
+    .eq('org_id', orgId);
+  if (error) throw error;
+  return { verified: true };
+}
+
+export async function disputeSessionAsOrg(orgId: string, sessionId: string, userId: string) {
+  await requireOrgAdmin(orgId, userId);
+  const { error } = await supabaseAdmin
+    .from('sessions')
+    .update({ status: 'disputed' })
+    .eq('id', sessionId)
+    .eq('org_id', orgId);
+  if (error) throw error;
+  return { disputed: true };
+}
+
+// ─── Team management ──────────────────────────────────────────────────────────
+
+export async function inviteTeamMember(
+  orgId: string,
+  userId: string,
+  email: string,
+  role: 'coordinator' | 'admin',
+) {
+  await requireOrgAdmin(orgId, userId);
+
+  // Look up user by email
+  const { data: invitee } = await supabaseAdmin
+    .from('users')
+    .select('id, name, email')
+    .eq('email', email.toLowerCase())
+    .maybeSingle();
+
+  if (!invitee) {
+    throw new Error('NO_ACCOUNT');
+  }
+
+  // Check if already a member
+  const { data: existing } = await supabaseAdmin
+    .from('org_admins')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('user_id', invitee.id)
+    .maybeSingle();
+
+  if (existing) throw new Error('ALREADY_MEMBER');
+
+  await supabaseAdmin.from('org_admins').insert({
+    org_id: orgId,
+    user_id: invitee.id,
+    role,
+  });
+
+  return { added: true, name: invitee.name, role };
+}
+
+export async function removeTeamMember(orgId: string, userId: string, targetUserId: string) {
+  const role = await requireOrgAdmin(orgId, userId);
+
+  if (role !== 'owner' && role !== 'admin') {
+    throw new ForbiddenError('Only admins can remove team members');
+  }
+  if (targetUserId === userId) {
+    throw new Error('SELF_REMOVE');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('org_admins')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('user_id', targetUserId);
+
+  if (error) throw error;
+  return { removed: true };
+}
+
+// ─── CSV export ───────────────────────────────────────────────────────────────
+
+export async function exportVolunteerCSV(orgId: string, userId: string): Promise<{ csv: string; filename: string }> {
+  await requireOrgAdmin(orgId, userId);
+
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
+    .select('name')
+    .eq('id', orgId)
+    .single();
+
+  const { data: sessions } = await supabaseAdmin
+    .from('sessions')
+    .select('date, hours, activity, status, users!sessions_user_id_fkey(name, school, grade)')
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .order('date', { ascending: false });
+
+  const rows = (sessions ?? []).map((s: any) => ({
+    Date: s.date,
+    'Student Name': s.users?.name ?? '',
+    School: s.users?.school ?? '',
+    Grade: s.users?.grade ?? '',
+    Hours: s.hours,
+    Activity: s.activity,
+    Status: s.status,
+  }));
+
+  // Build CSV without extra dependency
+  const headers = ['Date', 'Student Name', 'School', 'Grade', 'Hours', 'Activity', 'Status'];
+  const lines = [
+    headers.join(','),
+    ...rows.map((r: any) =>
+      headers.map((h) => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(','),
+    ),
+  ];
+
+  const orgName = (org?.name ?? 'org').replace(/[^a-z0-9]/gi, '-').toLowerCase();
+  const date = new Date().toISOString().split('T')[0];
+  return { csv: lines.join('\n'), filename: `${orgName}-volunteers-${date}.csv` };
+}
+
 function shapeOrgResult(org: any) {
   return {
     id: org.id,
