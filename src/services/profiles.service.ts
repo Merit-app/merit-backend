@@ -253,7 +253,12 @@ export async function uploadAvatar(
 
   if (uploadError) {
     logger.error({ userId, uploadError }, 'avatar_upload_failed');
-    throw new AppError('upload_failed', 'Failed to upload avatar. Please try again.', 500);
+    // Surface Supabase error detail (e.g. "Bucket not found") for easier diagnosis
+    throw new AppError(
+      'upload_failed',
+      `Failed to upload avatar: ${uploadError.message}`,
+      500,
+    );
   }
 
   const { data: urlData } = supabaseAdmin.storage.from('avatars').getPublicUrl(path);
