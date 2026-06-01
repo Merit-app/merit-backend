@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { validate } from '../middleware/validate.middleware';
 import { requireAuth } from '../middleware/auth.middleware';
 import { ipRateLimit } from '../middleware/rate-limit.middleware';
@@ -169,6 +170,68 @@ router.patch(
       const user = await authService.acceptConsent(req.user!.id);
       res.json(success({ user }));
     } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /auth/login/org — org-admin login; returns orgs the user administers
+router.post(
+  '/auth/login/org',
+  ipRateLimit('login', 10, 1),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const schema = z.object({
+        email: z.string().email(),
+        password: z.string().min(1),
+      });
+      const { email, password } = schema.parse(req.body);
+
+      const { data: authData, error: authError } =
+        await supabaseAdmin.auth.signInWithPassword({ email, password });
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      const { data: orgAdminRecords } = await supabaseAdmin
+        .from('org_admins')
+        .select('role, organizations(id, name, slug, logo_url)')
+        .eq('user_id', authData.user.id);
+
+      if (!orgAdminRecords?.length) {
+        return res.status(403).json({
+          error: 'No organization access',
+          message:
+            'This account does not have access to any organization. ' +
+            'Ask your org admin to invite you, or sign up as a student.',
+        });
+      }
+
+      const { data: user } = await supabaseAdmin
+        .from('users')
+        .select('id, name, email, plan, avatar_url')
+        .eq('id', authData.user.id)
+        .single();
+
+      const orgs = orgAdminRecords.map((r: any) => ({
+        ...r.organizations,
+        role: r.role,
+      }));
+
+      return res.json(
+        success({
+          user,
+          orgs,
+          defaultOrgId: orgs[0]?.id,
+          accessToken: authData.session?.access_token,
+          refreshToken: authData.session?.refresh_token,
+        }),
+      );
+    } catch (err: any) {
+      if (err.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid input' });
+      }
       next(err);
     }
   },
