@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requireRole } from '../middleware/role.middleware';
 import { validate } from '../middleware/validate.middleware';
@@ -113,19 +114,22 @@ router.post('/organizations/:orgId/sessions/:sessionId/dispute', requireAuth, as
 // ─── POST /organizations/:orgId/team/invite ───────────────────────────────────
 router.post('/organizations/:orgId/team/invite', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, role } = req.body as { email?: string; role?: string };
-    if (!email || typeof email !== 'string') {
-      return res.status(400).json({ error: 'email is required' });
-    }
-    const validRole = role === 'admin' ? 'admin' : 'coordinator';
+    const schema = z.object({
+      email: z.string().email('Invalid email address'),
+      role: z.enum(['coordinator', 'admin']).default('coordinator'),
+    });
+    const body = schema.parse(req.body);
     const result = await orgsService.inviteTeamMember(
       req.params.orgId as string,
       req.user!.id,
-      email,
-      validRole as 'coordinator' | 'admin',
+      body.email,
+      body.role,
     );
     res.status(201).json(success(result));
   } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: err.issues });
+    }
     if (err?.message === 'NO_ACCOUNT') {
       return res.status(404).json({ error: 'No Merit account found with that email. They need to sign up first.' });
     }

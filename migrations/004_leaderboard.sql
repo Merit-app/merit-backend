@@ -1,0 +1,5 @@
+-- Migration: 004_leaderboard.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Leaderboard groups — leaderboard_groups, leaderboard_group_members tables.
+--
+-- Note: SQL not captured at time of migration.

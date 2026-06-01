@@ -1,0 +1,7 @@
+-- Migration: 001_initial_schema.sql
+-- Applied: directly in Supabase SQL Editor (before repo was established)
+-- Description: Initial schema — users, sessions, organizations, authenticators,
+--              verifications, rate_limits, sms_opt_outs tables with RLS policies.
+--
+-- Note: SQL not captured at time of migration. Schema can be introspected
+--       from Supabase dashboard → Table Editor → each table.

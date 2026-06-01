@@ -1,0 +1,11 @@
+-- Migration: 013_indexes_and_rls.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Performance indexes and RLS policy fixes.
+--   - Indexes: sessions(user_id), sessions(org_id), sessions(status),
+--              user_badges(user_id), user_badges(badge_id),
+--              org_admins(org_id), org_admins(user_id),
+--              leaderboard_group_members(group_id), leaderboard_group_members(user_id),
+--              notifications(user_id, read).
+--   - RLS policy updates for public profile reads.
+--
+-- Note: SQL not captured at time of migration.

@@ -68,7 +68,11 @@ const envSchema = z.preprocess(coerceEmptyStrings, z.object({
   FRONTEND_URL: z.string().url().optional(),
   APP_NAME: z.string().default('Merit'),
   API_BASE_URL: z.string().url().optional(),
-  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_EMAIL: z.string().email().optional(), // Required in prod — set in Railway env vars
+
+  // Internal secrets (not in prodRequiredKeys because they disable features gracefully if absent)
+  HEALTH_SECRET_TOKEN: z.string().optional(),
+  PURGE_SECRET: z.string().optional(),
 
   // External APIs
   PROPUBLICA_API_BASE: z.string().url().optional(),
@@ -78,8 +82,10 @@ const prodRequiredKeys: (keyof z.infer<typeof envSchema>)[] = [
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
   'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
   'MAGIC_LINK_SECRET',
   'COOKIE_SECRET',
+  'ADMIN_EMAIL',
 ];
 
 function parseEnv() {

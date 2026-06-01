@@ -1,0 +1,5 @@
+-- Migration: 005_org_follows.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Organization follows — org_follows table with user_id, org_id FK columns.
+--
+-- Note: SQL not captured at time of migration.

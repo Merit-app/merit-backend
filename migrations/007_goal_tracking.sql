@@ -1,0 +1,6 @@
+-- Migration: 007_goal_tracking.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Goal tracking columns on users — goal_program, goal_hours,
+--              goal_start_date, goal_deadline, graduation_year.
+--
+-- Note: SQL not captured at time of migration.

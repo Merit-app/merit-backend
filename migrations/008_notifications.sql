@@ -1,0 +1,6 @@
+-- Migration: 008_notifications.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: In-app notifications — notifications table with user_id FK,
+--              type, title, body, read, action_url columns. RLS: users see own rows.
+--
+-- Note: SQL not captured at time of migration.

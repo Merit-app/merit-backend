@@ -1,0 +1,6 @@
+-- Migration: 002_chapters.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: NHS/honor-society chapters — chapters, chapter_coordinators tables.
+--              Added chapter_id FK to users.
+--
+-- Note: SQL not captured at time of migration.

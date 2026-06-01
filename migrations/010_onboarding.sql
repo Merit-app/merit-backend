@@ -1,0 +1,6 @@
+-- Migration: 010_onboarding.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Onboarding flow — added is_minor, consent_accepted, consent_accepted_at
+--              columns to users. Added onboarding endpoints support columns.
+--
+-- Note: SQL not captured at time of migration.

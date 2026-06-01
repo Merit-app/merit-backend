@@ -1,0 +1,6 @@
+-- Migration: 012_exports.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: PDF export tracking — export_logs table (optional). Verified sessions
+--              view for export service. Added pdf_url to sessions if needed.
+--
+-- Note: SQL not captured at time of migration.

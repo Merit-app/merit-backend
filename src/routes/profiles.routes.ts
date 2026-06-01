@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { AppError } from '../lib/errors';
 import { requireAuth } from '../middleware/auth.middleware';
+import { logger } from '../lib/logger';
 import { validate } from '../middleware/validate.middleware';
 import { rateLimit, ipRateLimit } from '../middleware/rate-limit.middleware';
 import { updateProfileSchema, checkUsernameSchema } from '../schemas/profiles.schema';
@@ -80,8 +81,29 @@ router.post(
   },
 );
 
+// GET /profiles/sitemap — public, returns all public usernames for sitemap generation
+// NOTE: must be registered BEFORE /profiles/:username so "sitemap" isn't treated as a username
+router.get(
+  '/profiles/sitemap',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('username, updated_at')
+        .eq('profile_public', true)
+        .not('username', 'is', null)
+        .order('updated_at', { ascending: false })
+        .limit(1000);
+      return res.json(success({ data: data ?? [] }));
+    } catch (err) {
+      logger.error(err, 'profiles_sitemap_error');
+      return res.json(success({ data: [] })); // Never fail a sitemap request
+    }
+  },
+);
+
 // GET /profiles/:username  — public, no auth required
-// NOTE: must be registered AFTER /profiles/me and /profiles/check-username
+// NOTE: must be registered AFTER /profiles/me, /profiles/check-username, and /profiles/sitemap
 router.get(
   '/profiles/:username',
   async (req: Request, res: Response, next: NextFunction) => {

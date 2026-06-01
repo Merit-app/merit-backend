@@ -71,8 +71,7 @@ router.post(
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const adminEmail = env.ADMIN_EMAIL ?? 'kai@meritco.app';
-      if (req.user!.email !== adminEmail) {
+      if (!env.ADMIN_EMAIL || req.user!.email !== env.ADMIN_EMAIL) {
         return res.status(403).json({ error: 'Admin only' });
       }
       await orgClaimsService.approveClaim(req.params.claimId as string);
@@ -90,8 +89,7 @@ router.post(
   requireAuth,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const adminEmail = env.ADMIN_EMAIL ?? 'kai@meritco.app';
-      if (req.user!.email !== adminEmail) {
+      if (!env.ADMIN_EMAIL || req.user!.email !== env.ADMIN_EMAIL) {
         return res.status(403).json({ error: 'Admin only' });
       }
       const { reason } = z.object({ reason: z.string().optional() }).parse(req.body);

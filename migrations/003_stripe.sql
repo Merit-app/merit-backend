@@ -1,0 +1,6 @@
+-- Migration: 003_stripe.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Stripe billing — stripe_events deduplication table.
+--              Added plan column to users ('free' | 'pro' | 'premium' | 'institutional').
+--
+-- Note: SQL not captured at time of migration.

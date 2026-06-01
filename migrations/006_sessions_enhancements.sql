@@ -1,0 +1,6 @@
+-- Migration: 006_sessions_enhancements.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Added fraud_score, verification_tier, verified_at, verified_by,
+--              deleted_at soft-delete, and org_id FK to sessions.
+--
+-- Note: SQL not captured at time of migration.

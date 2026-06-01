@@ -1,0 +1,16 @@
+-- Migration: 009_profiles_and_orgs.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Public profiles + badges + org accounts + onboarding.
+--   - ALTER users: username (unique), username_changed_at, profile_public (default true),
+--                  bio (≤200 chars), top_badge_ids text[], onboarding_completed,
+--                  onboarding_skipped_at.
+--   - ALTER organizations: slug (unique), claimed, claimed_at, claimed_by_user_id,
+--                          logo_url, cover_url, description (≤1000 chars), website_url,
+--                          contact_email, contact_phone, is_recruiting,
+--                          org_plan ('free'|'institutional').
+--   - ALTER sessions: org_verified_by_user_id, org_verified_at.
+--   - NEW: badges, user_badges, badge_stats, org_admins, org_claims tables.
+--   - Seeded 18 badge rows (bronze=5, silver=5, gold=4, platinum=4).
+--   - RLS enabled on user_badges, org_admins, org_claims.
+--
+-- Note: SQL not captured at time of migration. See merit_feature_spec_v1.md §4 for schema.

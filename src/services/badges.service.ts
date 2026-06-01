@@ -194,13 +194,15 @@ export async function computeBadgesForUser(userId: string): Promise<Badge[]> {
   ]);
 
   const allBadges = (badgesResult.data ?? []) as Badge[];
-  const earned: Badge[] = [];
 
-  for (const badge of allBadges) {
-    if (await checkCondition(badge, stats, userId)) {
-      earned.push(badge);
-    }
-  }
+  // Run all badge condition checks in parallel instead of serially
+  const results = await Promise.all(
+    allBadges.map(async (badge) => {
+      const passed = await checkCondition(badge, stats, userId);
+      return passed ? badge : null;
+    }),
+  );
+  const earned = results.filter((b): b is Badge => b !== null);
 
   if (earned.length > 0) {
     const rows = earned.map((b) => ({ user_id: userId, badge_id: b.id }));

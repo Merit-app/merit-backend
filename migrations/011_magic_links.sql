@@ -1,0 +1,6 @@
+-- Migration: 011_magic_links.sql
+-- Applied: directly in Supabase SQL Editor
+-- Description: Magic link verification tokens — magic_links table with token (unique),
+--              user_id FK, email, expires_at, used_at.
+--
+-- Note: SQL not captured at time of migration.

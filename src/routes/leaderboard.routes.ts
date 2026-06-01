@@ -221,6 +221,26 @@ router.get(
         return res.status(404).json({ error: 'Group not found' });
       }
 
+      // If private, verify the requester is a member
+      if ((group as any).is_private) {
+        if (!req.user?.id) {
+          return res.status(403).json({
+            error: 'This is a private group. Sign in to access it.',
+          });
+        }
+        const { data: membership } = await supabaseAdmin
+          .from('leaderboard_group_members')
+          .select('id')
+          .eq('group_id', groupId)
+          .eq('user_id', req.user.id)
+          .maybeSingle();
+        if (!membership) {
+          return res.status(403).json({
+            error: 'You are not a member of this group.',
+          });
+        }
+      }
+
       // Get members with user info
       const { data: members } = await supabaseAdmin
         .from('leaderboard_group_members')
