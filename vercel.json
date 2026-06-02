@@ -1,7 +1,6 @@
 {
   "experimentalServices": {
     "web": {
-      "framework": "nodejs",
       "entrypoint": "src/server.ts",
       "routePrefix": "/",
       "buildCommand": "npm run build"
