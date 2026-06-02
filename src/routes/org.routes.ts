@@ -374,4 +374,46 @@ router.post('/invites/:token/accept', requireAuth, async (req: Request, res: Res
   }
 });
 
+// ── ONBOARDING ────────────────────────────────────────────────────────────────
+
+// GET /org/:orgId/onboarding
+router.get('/:orgId/onboarding', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('org_admins')
+      .select('onboarding_completed, onboarding_completed_at')
+      .eq('org_id', req.params.orgId as string)
+      .eq('user_id', req.user!.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(403).json({ error: 'Not authorized' });
+
+    return res.json({ data });
+  } catch (err) {
+    logger.error(err, 'get_onboarding_error');
+    return res.status(500).json({ error: 'Failed to check onboarding' });
+  }
+});
+
+// POST /org/:orgId/onboarding/complete
+router.post('/:orgId/onboarding/complete', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+  try {
+    const { error } = await supabaseAdmin
+      .from('org_admins')
+      .update({
+        onboarding_completed: true,
+        onboarding_completed_at: new Date().toISOString(),
+      })
+      .eq('org_id', req.params.orgId as string)
+      .eq('user_id', req.user!.id);
+
+    if (error) throw error;
+    return res.json({ data: { completed: true } });
+  } catch (err) {
+    logger.error(err, 'complete_onboarding_error');
+    return res.status(500).json({ error: 'Failed to complete onboarding' });
+  }
+});
+
 export default router;

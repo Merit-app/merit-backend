@@ -15,6 +15,8 @@ import {
 } from '../schemas/auth.schema';
 import * as authService from '../services/auth.service';
 import { success } from '../utils/shape';
+import { generateUsername } from '../services/usernames.service';
+import { env } from '../config/env';
 
 const router = Router();
 
@@ -232,6 +234,156 @@ router.post(
     } catch (err: any) {
       if (err.name === 'ZodError') {
         return res.status(400).json({ error: 'Invalid input' });
+      }
+      next(err);
+    }
+  },
+);
+
+// POST /auth/org/signup — create a Merit account and add as org admin
+router.post(
+  '/auth/org/signup',
+  ipRateLimit('signup', 5, 1),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const schema = z.object({
+        email: z.string().email(),
+        password: z.string().min(8),
+        name: z.string().min(2).max(100),
+        orgId: z.string().uuid(),
+        role: z.enum(['owner', 'admin', 'coordinator']).default('owner'),
+        token: z.string().optional(),
+      });
+      const body = schema.parse(req.body);
+
+      // Verify the org exists
+      const { data: org } = await supabaseAdmin
+        .from('organizations')
+        .select('id, name')
+        .eq('id', body.orgId)
+        .maybeSingle();
+
+      if (!org) {
+        return res.status(404).json({ error: 'Organization not found' });
+      }
+
+      // Check email not already taken
+      const { data: existingUser } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('email_lower', body.email.toLowerCase())
+        .maybeSingle();
+
+      if (existingUser) {
+        return res.status(409).json({
+          error: 'An account with this email already exists. Please sign in instead.',
+          code: 'EMAIL_EXISTS',
+        });
+      }
+
+      // Create Supabase auth user via GoTrue admin API (same pattern as auth.service.ts)
+      let authUserId: string;
+      if (SUPABASE_MODE === 'mock') {
+        const { data: mockData, error: mockErr } = await supabaseAdmin.auth.signUp({
+          email: body.email,
+          password: body.password,
+          options: { data: { name: body.name } },
+        });
+        if (mockErr || !mockData?.user) {
+          return res.status(400).json({ error: mockErr?.message ?? 'Failed to create account' });
+        }
+        authUserId = mockData.user.id;
+      } else {
+        const projectUrl = (env.SUPABASE_URL ?? '').replace(/\/+$/, '').replace(/\/(rest|auth)\/v\d+.*$/, '');
+        const gotrueRes = await fetch(`${projectUrl}/auth/v1/admin/users`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+            'apikey': env.SUPABASE_SERVICE_ROLE_KEY!,
+          },
+          body: JSON.stringify({
+            email: body.email,
+            password: body.password,
+            email_confirm: true, // auto-confirm for org admin accounts
+            user_metadata: { name: body.name },
+          }),
+        });
+        const gotrueBody = await gotrueRes.json() as any;
+        if (!gotrueRes.ok || !gotrueBody?.id) {
+          return res.status(400).json({ error: gotrueBody?.msg ?? gotrueBody?.message ?? 'Failed to create account' });
+        }
+        authUserId = gotrueBody.id as string;
+      }
+
+      // Generate username and insert user row
+      const nameParts = body.name.trim().split(/\s+/);
+      const firstName = nameParts[0] ?? body.name;
+      const lastName = nameParts.slice(1).join(' ') || firstName;
+      const username = await generateUsername(firstName, lastName);
+
+      const { error: userError } = await supabaseAdmin
+        .from('users')
+        .insert({
+          id: authUserId,
+          email: body.email,
+          email_lower: body.email.toLowerCase(),
+          name: body.name,
+          username,
+          plan: 'free',
+          onboarding_completed: true, // skip student onboarding for org admins
+        });
+
+      if (userError) {
+        await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+        return res.status(500).json({ error: 'Failed to create user profile' });
+      }
+
+      // Add as org admin (onboarding_completed: false so they see the walkthrough)
+      await supabaseAdmin
+        .from('org_admins')
+        .upsert({
+          org_id: body.orgId,
+          user_id: authUserId,
+          role: body.role,
+          onboarding_completed: false,
+        })
+        .catch((err: unknown) => {
+          void err; // non-fatal — account still created
+        });
+
+      // Sign in immediately to return tokens
+      const { data: sessionData, error: signInError } =
+        await supabaseAdmin.auth.signInWithPassword({
+          email: body.email,
+          password: body.password,
+        });
+
+      if (signInError || !sessionData.session) {
+        // Account created but sign-in failed — user can sign in manually
+        return res.status(201).json({
+          data: {
+            user: { id: authUserId, name: body.name, email: body.email, username, plan: 'free' },
+            org: { id: org.id, name: org.name, role: body.role },
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: null,
+          },
+        });
+      }
+
+      return res.status(201).json(
+        success({
+          user: { id: authUserId, name: body.name, email: body.email, username, plan: 'free' },
+          org: { id: org.id, name: org.name, slug: '', role: body.role },
+          accessToken: sessionData.session.access_token,
+          refreshToken: sessionData.session.refresh_token,
+          expiresAt: sessionData.session.expires_at,
+        }),
+      );
+    } catch (err: any) {
+      if (err.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid input', details: err.errors });
       }
       next(err);
     }

@@ -249,10 +249,10 @@ export async function getAdminOrgs(userId: string) {
 
 /** Full dashboard data for an org, verified admin only */
 export async function getOrgDashboard(orgId: string, userId: string) {
-  // Verify admin
+  // Verify admin and pull onboarding state in one query
   const { data: adminRecord } = await supabaseAdmin
     .from('org_admins')
-    .select('role')
+    .select('role, onboarding_completed')
     .eq('org_id', orgId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -263,29 +263,40 @@ export async function getOrgDashboard(orgId: string, userId: string) {
     supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
     supabaseAdmin
       .from('sessions')
-      .select('id, date, hours, status, activity, users!sessions_user_id_fkey(name, school, grade)')
+      .select('id, date, hours, status, activity, user_id, users!sessions_user_id_fkey(id, name, school, grade)')
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('date', { ascending: false })
       .limit(50),
     supabaseAdmin
       .from('org_admins')
-      .select('role, users!org_admins_user_id_fkey(name, email)')
+      .select('role, users!org_admins_user_id_fkey(id, name, email, avatar_url)')
       .eq('org_id', orgId),
   ]);
 
   const sessionList = sessions ?? [];
-  const totalHours = sessionList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
-  const uniqueStudents = new Set(sessionList.map((s: any) => s.users?.name).filter(Boolean)).size;
-  const verifiedSessions = sessionList.filter((s: any) => s.status === 'verified').length;
+  const verifiedList = sessionList.filter((s: any) => s.status === 'verified');
+  const totalHours = verifiedList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
+  // Count unique students by user_id (not name, which can be duplicated/null)
+  const uniqueStudents = new Set(
+    sessionList.map((s: any) => s.user_id ?? (s as any).users?.id).filter(Boolean),
+  ).size;
+  const verifiedSessions = verifiedList.length;
   const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
 
   return {
     org,
-    stats: { totalStudents: uniqueStudents, totalHours, totalSessions: sessionList.length, verifiedSessions, pendingSessions },
+    stats: {
+      totalStudents: uniqueStudents,
+      totalHours: Math.round(totalHours * 10) / 10,
+      totalSessions: sessionList.length,
+      verifiedSessions,
+      pendingSessions,
+    },
     recentSessions: sessionList.slice(0, 20),
     admins: admins ?? [],
     userRole: adminRecord.role,
+    onboardingCompleted: (adminRecord as any).onboarding_completed ?? false,
   };
 }
 
