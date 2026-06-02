@@ -226,6 +226,7 @@ router.post(
           defaultOrgId: orgs[0]?.id,
           accessToken: authData.session?.access_token,
           refreshToken: authData.session?.refresh_token,
+          expiresAt: authData.session?.expires_at,
         }),
       );
     } catch (err: any) {
