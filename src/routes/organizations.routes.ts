@@ -254,4 +254,77 @@ router.post(
   },
 );
 
+// ─── PATCH /organizations/:orgId/profile ──────────────────────────────────────
+// Full profile update including name — org admins only
+router.patch(
+  '/organizations/:orgId/profile',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const schema = z.object({
+        name: z.string().min(2).max(200).optional(),
+        description: z.string().max(1000).optional(),
+        website_url: z.string().url().optional().or(z.literal('')),
+        contact_email: z.string().email().optional().or(z.literal('')),
+        contact_phone: z.string().max(30).optional().or(z.literal('')),
+        is_recruiting: z.boolean().optional(),
+      });
+      const body = schema.parse(req.body);
+      const updated = await orgsService.updateOrgProfile(
+        req.params.orgId as string,
+        req.user!.id,
+        body,
+      );
+      return res.json(success(updated));
+    } catch (err: any) {
+      if (err?.name === 'ZodError') {
+        return res.status(400).json({ error: err.errors?.[0]?.message ?? 'Invalid input' });
+      }
+      if (err?.message === 'Not authorized to edit this organization') {
+        return res.status(403).json({ error: err.message });
+      }
+      if (err?.message === 'No fields to update') {
+        return res.status(400).json({ error: err.message });
+      }
+      next(err);
+    }
+  },
+);
+
+// ─── POST /organizations/:orgId/logo?type=logo|cover ──────────────────────────
+// Upload a logo or cover image — org admins only
+router.post(
+  '/organizations/:orgId/logo',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const kind = req.query.type === 'cover' ? 'cover' : 'logo';
+      const schema = z.object({
+        base64: z.string().min(1),
+        mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp', 'image/gif']),
+      });
+      const body = schema.parse(req.body);
+      const result = await orgsService.uploadOrgImage({
+        orgId: req.params.orgId as string,
+        userId: req.user!.id,
+        kind,
+        base64: body.base64,
+        mimeType: body.mimeType,
+      });
+      return res.json(success(result));
+    } catch (err: any) {
+      if (err?.name === 'ZodError') {
+        return res.status(400).json({ error: err.errors?.[0]?.message ?? 'Invalid input' });
+      }
+      if (err?.message === 'Not authorized to edit this organization') {
+        return res.status(403).json({ error: err.message });
+      }
+      if (err?.message?.includes('Only JPEG') || err?.message?.includes('under 5 MB')) {
+        return res.status(400).json({ error: err.message });
+      }
+      next(err);
+    }
+  },
+);
+
 export default router;

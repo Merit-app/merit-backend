@@ -41,6 +41,8 @@ app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWeb
 
 // Avatar upload needs a higher body size limit — must come before the global 1 MB parser
 app.use('/profiles/me/avatar', express.json({ limit: '10mb' }));
+// Org logo/cover upload also needs the higher limit (base64 of a 5 MB image ≈ 6.7 MB)
+app.use('/organizations/:orgId/logo', express.json({ limit: '10mb' }));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));

@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
 import * as orgClaimsService from '../services/org-claims.service';
+import { supabaseAdmin } from '../config/supabase';
 import { success } from '../utils/shape';
 import { logger } from '../lib/logger';
 import { env } from '../config/env';
@@ -9,6 +10,39 @@ import { env } from '../config/env';
 const router = Router();
 
 const VALID_ROLES = ['employee', 'coordinator', 'owner', 'board_member', 'other'] as const;
+
+// GET /org-claims — list all claims (admin only)
+router.get(
+  '/org-claims',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (req.user!.email !== env.ADMIN_EMAIL) {
+        return res.status(403).json({ error: 'Admin only' });
+      }
+      const { status } = req.query;
+      let query = supabaseAdmin
+        .from('org_claims')
+        .select(`
+          id, status, role, email, email_domain, domain_matched,
+          created_at, reviewed_at, rejected_reason,
+          users:user_id ( id, name, email ),
+          organizations:org_id ( id, name, slug, website_url )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (status && typeof status === 'string') {
+        query = query.eq('status', status) as typeof query;
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return res.json(success({ claims: data ?? [] }));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 // POST /org-claims — submit a claim for an org
 router.post(

@@ -323,6 +323,110 @@ export async function updateOrg(orgId: string, userId: string, input: UpdateOrgI
   return { updated: true };
 }
 
+// ─── Full profile update (incl. name) — admin only ────────────────────────────
+
+export interface UpdateOrgProfileInput {
+  name?: string;
+  description?: string;
+  website_url?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  is_recruiting?: boolean;
+}
+
+export async function updateOrgProfile(orgId: string, userId: string, input: UpdateOrgProfileInput) {
+  const { data: adminRecord } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!adminRecord) throw new ForbiddenError('Not authorized to edit this organization');
+
+  const patch: Record<string, unknown> = {};
+  if (input.name !== undefined) patch.name = sanitize(input.name);
+  if (input.description !== undefined) patch.description = sanitize(input.description);
+  if (input.website_url !== undefined) patch.website_url = input.website_url || null;
+  if (input.contact_email !== undefined) patch.contact_email = input.contact_email || null;
+  if (input.contact_phone !== undefined) patch.contact_phone = input.contact_phone || null;
+  if (input.is_recruiting !== undefined) patch.is_recruiting = input.is_recruiting;
+
+  if (Object.keys(patch).length === 0) {
+    throw new ForbiddenError('No fields to update');
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('organizations')
+    .update(patch)
+    .eq('id', orgId)
+    .select('*')
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// ─── Logo / cover upload — admin only ─────────────────────────────────────────
+
+const ORG_IMAGE_TYPES: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+export async function uploadOrgImage(params: {
+  orgId: string;
+  userId: string;
+  kind: 'logo' | 'cover';
+  base64: string;
+  mimeType: string;
+}): Promise<{ url: string }> {
+  const { orgId, userId, kind, base64, mimeType } = params;
+
+  const { data: adminRecord } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!adminRecord) throw new ForbiddenError('Not authorized to edit this organization');
+
+  const ext = ORG_IMAGE_TYPES[mimeType];
+  if (!ext) throw new ForbiddenError('Only JPEG, PNG, WebP and GIF images are allowed');
+
+  const raw = base64.includes(',') ? base64.split(',')[1] : base64;
+  const buffer = Buffer.from(raw, 'base64');
+  if (buffer.length > 5 * 1024 * 1024) {
+    throw new ForbiddenError('Image must be under 5 MB');
+  }
+
+  const path = `orgs/${orgId}/${kind}.${ext}`;
+  const { error: uploadError } = await supabaseAdmin.storage
+    .from('avatars')
+    .upload(path, buffer, { contentType: mimeType, upsert: true });
+
+  if (uploadError) {
+    logger.error({ orgId, uploadError }, 'org_image_upload_failed');
+    throw new Error(`Failed to upload image: ${uploadError.message}`);
+  }
+
+  // Cache-bust so the new image shows immediately
+  const { data: urlData } = supabaseAdmin.storage.from('avatars').getPublicUrl(path);
+  const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`;
+
+  const field = kind === 'logo' ? 'logo_url' : 'cover_url';
+  const { error: updateError } = await supabaseAdmin
+    .from('organizations')
+    .update({ [field]: publicUrl })
+    .eq('id', orgId);
+
+  if (updateError) throw updateError;
+  return { url: publicUrl };
+}
+
 // ─── Org admin helper ─────────────────────────────────────────────────────────
 
 async function requireOrgAdmin(orgId: string, userId: string): Promise<string> {
