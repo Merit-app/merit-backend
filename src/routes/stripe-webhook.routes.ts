@@ -68,6 +68,24 @@ async function handleStripeEvent(event: any): Promise<void> {
 
   switch (type) {
     case 'checkout.session.completed': {
+      // Check if this is an org subscription checkout
+      if (obj.metadata?.type === 'org_subscription') {
+        const { orgId, plan } = obj.metadata ?? {};
+        const subscriptionId: string | null = obj.subscription ?? null;
+        if (orgId && plan && subscriptionId) {
+          await supabaseAdmin
+            .from('organizations')
+            .update({
+              org_plan: plan,
+              stripe_subscription_id: subscriptionId,
+              subscription_status: 'active',
+            })
+            .eq('id', orgId);
+          logger.info({ orgId, plan }, 'org_subscription_activated');
+        }
+        break;
+      }
+
       // Eagerly sync the subscription so plan upgrades land immediately.
       // customer.subscription.created fires shortly after, but this ensures
       // the plan is set even if that event arrives out of order or is delayed.
@@ -97,6 +115,24 @@ async function handleStripeEvent(event: any): Promise<void> {
 
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
+      // Org subscriptions: update organizations table directly
+      if (obj.metadata?.type === 'org_subscription') {
+        const orgId = obj.metadata?.orgId;
+        if (orgId) {
+          await supabaseAdmin
+            .from('organizations')
+            .update({
+              subscription_status: obj.status,
+              subscription_period_end: obj.current_period_end
+                ? new Date(obj.current_period_end * 1000).toISOString()
+                : null,
+            })
+            .eq('stripe_subscription_id', obj.id);
+          logger.info({ orgId, status: obj.status }, 'org_subscription_updated');
+        }
+        break;
+      }
+
       const priceId: string | null = obj.items?.data?.[0]?.price?.id ?? null;
       await syncSubscription(
         obj.id,
@@ -110,6 +146,23 @@ async function handleStripeEvent(event: any): Promise<void> {
     }
 
     case 'customer.subscription.deleted': {
+      // Org subscription cancellation
+      if (obj.metadata?.type === 'org_subscription') {
+        const orgId = obj.metadata?.orgId;
+        if (orgId) {
+          await supabaseAdmin
+            .from('organizations')
+            .update({
+              org_plan: 'basic',
+              subscription_status: 'cancelled',
+              stripe_subscription_id: null,
+            })
+            .eq('id', orgId);
+          logger.info({ orgId }, 'org_subscription_cancelled');
+        }
+        break;
+      }
+
       await syncSubscription(obj.id, obj.customer, 'canceled', null, null, false);
       break;
     }

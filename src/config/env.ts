@@ -43,6 +43,11 @@ const envSchema = z.preprocess(coerceEmptyStrings, z.object({
   STRIPE_PRICE_PREMIUM_YEARLY: z.string().optional(),
   STRIPE_PRICE_INSTITUTIONAL: z.string().optional(),
   STRIPE_TAX_ENABLED: z.coerce.boolean().default(false),
+  // Org plan prices
+  ORG_PRO_MONTHLY_PRICE_ID: z.string().optional(),
+  ORG_PRO_YEARLY_PRICE_ID: z.string().optional(),
+  ORG_ENTERPRISE_MONTHLY_PRICE_ID: z.string().optional(),
+  ORG_ENTERPRISE_YEARLY_PRICE_ID: z.string().optional(),
 
   // Sentry
   SENTRY_DSN: z.string().url().optional(),

@@ -68,6 +68,7 @@ import publicOrgsRouter from './routes/public-orgs.routes';
 import orgClaimsRouter from './routes/org-claims.routes';
 import leaderboardRouter from './routes/leaderboard.routes';
 import orgRouter from './routes/org.routes';
+import orgBillingRouter from './routes/org-billing.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -87,6 +88,7 @@ app.use('/', publicOrgsRouter);
 app.use('/', orgClaimsRouter);
 app.use('/', leaderboardRouter);
 app.use('/org', orgRouter);
+app.use('/org', orgBillingRouter);
 
 // 404 & error handling
 app.use(notFound);
