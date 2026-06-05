@@ -281,7 +281,7 @@ export async function requestPasswordReset(email: string, ip?: string) {
 
   if (!user) return; // Silent — don't reveal existence
 
-  const resetUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/auth/reset-password`;
+  const resetUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password`;
 
   // Supabase sends the reset email; we also send our branded one
   await (supabaseAdmin.auth as any).resetPasswordForEmail?.(email, {
@@ -310,8 +310,21 @@ export async function resetPassword(token: string, newPassword: string) {
 
   if (SUPABASE_MODE === 'mock') return;
 
-  const { error } = await (supabaseAdmin.auth as any).updateUser?.({ password: newPassword });
-  if (error) throw new AppError('reset_failed', 'Failed to reset password.', 400);
+  // Validate the recovery access_token and resolve the user it belongs to
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+  if (userError || !userData?.user) {
+    throw new AppError('invalid_token', 'Reset link is invalid or has expired. Please request a new one.', 400);
+  }
+
+  // Update password via admin API (no session required)
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+    userData.user.id,
+    { password: newPassword },
+  );
+  if (updateError) {
+    logger.error(updateError, 'reset_password_update_failed');
+    throw new AppError('reset_failed', 'Failed to reset password. Please try again.', 400);
+  }
 }
 
 // ─── Email confirmation ────────────────────────────────────────────────────
