@@ -17,6 +17,7 @@ import * as authService from '../services/auth.service';
 import { success } from '../utils/shape';
 import { generateUsername } from '../services/usernames.service';
 import { env } from '../config/env';
+import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -385,6 +386,59 @@ router.post(
       if (err.name === 'ZodError') {
         return res.status(400).json({ error: 'Invalid input', details: err.errors });
       }
+      next(err);
+    }
+  },
+);
+
+// POST /auth/change-password — change password for authenticated user
+router.post(
+  '/auth/change-password',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'Missing fields' });
+      }
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters' });
+      }
+
+      const userEmail = req.user!.email;
+      if (!userEmail) {
+        return res.status(400).json({ error: 'User email not found' });
+      }
+
+      // Verify current password by attempting sign-in
+      const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+        email: userEmail,
+        password: currentPassword,
+      });
+
+      if (signInError) {
+        return res.status(401).json({
+          error: 'Current password is incorrect',
+          code: 'INVALID_CURRENT_PASSWORD',
+        });
+      }
+
+      // Update to new password
+      const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+        req.user!.id,
+        { password: newPassword },
+      );
+
+      if (updateError) {
+        logger.error(updateError, 'change_password_update_failed');
+        return res.status(500).json({ error: 'Failed to update password' });
+      }
+
+      logger.info({ userId: req.user!.id }, 'password_changed');
+      return res.json(success({ changed: true }));
+    } catch (err) {
+      logger.error(err, 'change_password_error');
       next(err);
     }
   },
