@@ -259,6 +259,8 @@ export async function getOrgDashboard(orgId: string, userId: string) {
 
   if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
 
+  logger.info({ orgId, userId }, 'org_dashboard_query_start');
+
   const [{ data: org }, { data: sessions }, { data: admins }] = await Promise.all([
     supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
     supabaseAdmin
@@ -283,6 +285,8 @@ export async function getOrgDashboard(orgId: string, userId: string) {
   ).size;
   const verifiedSessions = verifiedList.length;
   const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
+
+  logger.info({ orgId, orgFound: !!org, orgPlan: (org as any)?.org_plan ?? 'basic' }, 'org_dashboard_result');
 
   return {
     org,

@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requireOrgPlan } from '../middleware/require-org-plan';
 import * as eventsService from '../services/org-events.service';
 import * as reportsService from '../services/org-reports.service';
 import * as messagesService from '../services/org-messages.service';
@@ -52,7 +53,7 @@ router.get('/:orgId/events', requireAuth, async (req: Request, res: Response, _n
 });
 
 // POST /org/:orgId/events
-router.post('/:orgId/events', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+router.post('/:orgId/events', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
   try {
     await requireOrgAdmin(req.params.orgId as string, req.user!.id);
 
@@ -100,7 +101,7 @@ router.get('/:orgId/events/:eventId', requireAuth, async (req: Request, res: Res
 });
 
 // POST /org/:orgId/events/:eventId/publish
-router.post('/:orgId/events/:eventId/publish', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+router.post('/:orgId/events/:eventId/publish', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
   try {
     await requireOrgAdmin(req.params.orgId as string, req.user!.id);
     const result = await eventsService.publishEvent(
@@ -165,7 +166,7 @@ router.post('/:orgId/events/:eventId/signup', requireAuth, async (req: Request, 
 // ── REPORTS ───────────────────────────────────────────────────────────────────
 
 // GET /org/:orgId/reports/grant   → PDF download
-router.get('/:orgId/reports/grant', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+router.get('/:orgId/reports/grant', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
   try {
     await requireOrgAdmin(req.params.orgId as string, req.user!.id);
 
@@ -234,7 +235,7 @@ router.get('/:orgId/reports/impact', requireAuth, async (req: Request, res: Resp
 // ── CERTIFICATES ──────────────────────────────────────────────────────────────
 
 // POST /org/:orgId/certificates
-router.post('/:orgId/certificates', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+router.post('/:orgId/certificates', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
   try {
     await requireOrgAdmin(req.params.orgId as string, req.user!.id);
 
@@ -266,7 +267,7 @@ router.post('/:orgId/certificates', requireAuth, async (req: Request, res: Respo
 // ── MESSAGES ──────────────────────────────────────────────────────────────────
 
 // POST /org/:orgId/messages
-router.post('/:orgId/messages', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+router.post('/:orgId/messages', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
   try {
     await requireOrgAdmin(req.params.orgId as string, req.user!.id);
 
