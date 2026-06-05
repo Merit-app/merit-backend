@@ -269,7 +269,7 @@ export async function getOrgDashboard(orgId: string, userId: string) {
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('date', { ascending: false })
-      .limit(50),
+      .limit(100),
     supabaseAdmin
       .from('org_admins')
       .select('role, users!org_admins_user_id_fkey(id, name, email, avatar_url)')
@@ -279,19 +279,34 @@ export async function getOrgDashboard(orgId: string, userId: string) {
   const sessionList = sessions ?? [];
   const verifiedList = sessionList.filter((s: any) => s.status === 'verified');
   const totalHours = verifiedList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
-  // Count unique students by user_id (not name, which can be duplicated/null)
-  const uniqueStudents = new Set(
+  const sessionStudentIds = new Set(
     sessionList.map((s: any) => s.user_id ?? (s as any).users?.id).filter(Boolean),
-  ).size;
+  );
+
+  // Also count students who registered interest but have no sessions yet
+  // (fails silently if table doesn't exist yet)
+  let interestedOnlyCount = 0;
+  try {
+    const { data: interested } = await supabaseAdmin
+      .from('org_volunteer_interests')
+      .select('users!org_volunteer_interests_user_id_fkey(id)')
+      .eq('org_id', orgId);
+    interestedOnlyCount = (interested ?? [])
+      .filter((i: any) => {
+        const uid = i.users?.id;
+        return uid && !sessionStudentIds.has(uid);
+      }).length;
+  } catch { /* table may not exist yet — silent */ }
+
   const verifiedSessions = verifiedList.length;
   const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
 
-  logger.info({ orgId, orgFound: !!org, orgPlan: (org as any)?.org_plan ?? 'basic' }, 'org_dashboard_result');
+  logger.info({ orgId, orgFound: !!org, sessions: sessionList.length, interestedOnly: interestedOnlyCount }, 'org_dashboard_result');
 
   return {
     org,
     stats: {
-      totalStudents: uniqueStudents,
+      totalStudents: sessionStudentIds.size + interestedOnlyCount,
       totalHours: Math.round(totalHours * 10) / 10,
       totalSessions: sessionList.length,
       verifiedSessions,
@@ -485,8 +500,32 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     }
   }
 
-  return Array.from(studentMap.values())
+  const sessionVolunteers = Array.from(studentMap.values())
     .sort((a, b) => b.verifiedHours - a.verifiedHours);
+
+  // Append students who registered interest but have no sessions yet
+  // (fails silently if the table doesn't exist yet)
+  try {
+    const { data: interested } = await supabaseAdmin
+      .from('org_volunteer_interests')
+      .select('created_at, users!org_volunteer_interests_user_id_fkey(id, name, school, grade, username, avatar_url)')
+      .eq('org_id', orgId);
+
+    const interestOnly = (interested ?? [])
+      .filter((i: any) => i.users?.id && !studentMap.has(i.users.id))
+      .map((i: any) => ({
+        student: i.users,
+        sessions: [] as any[],
+        totalHours: 0,
+        verifiedHours: 0,
+        lastActive: i.created_at as string,
+        isInterested: true,
+      }));
+
+    return [...sessionVolunteers, ...interestOnly];
+  } catch {
+    return sessionVolunteers;
+  }
 }
 
 // ─── Verify / dispute session as org ─────────────────────────────────────────
@@ -617,6 +656,44 @@ export async function exportVolunteerCSV(orgId: string, userId: string): Promise
   const orgName = (org?.name ?? 'org').replace(/[^a-z0-9]/gi, '-').toLowerCase();
   const date = new Date().toISOString().split('T')[0];
   return { csv: lines.join('\n'), filename: `${orgName}-volunteers-${date}.csv` };
+}
+
+// ─── Volunteer interest ("I volunteer here") ──────────────────────────────────
+
+export async function registerInterest(orgId: string, userId: string) {
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
+    .select('id, name')
+    .eq('id', orgId)
+    .maybeSingle();
+  if (!org) throw new NotFoundError('Organization');
+
+  const { error } = await supabaseAdmin
+    .from('org_volunteer_interests')
+    .upsert({ org_id: orgId, user_id: userId }, { onConflict: 'user_id,org_id' });
+  if (error) throw error;
+
+  return { registered: true, orgName: org.name };
+}
+
+export async function unregisterInterest(orgId: string, userId: string) {
+  const { error } = await supabaseAdmin
+    .from('org_volunteer_interests')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return { unregistered: true };
+}
+
+export async function getInterestStatus(orgId: string, userId: string) {
+  const { data } = await supabaseAdmin
+    .from('org_volunteer_interests')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  return { registered: !!data };
 }
 
 function shapeOrgResult(org: any) {

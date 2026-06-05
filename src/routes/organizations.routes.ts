@@ -6,6 +6,7 @@ import { validate } from '../middleware/validate.middleware';
 import { orgSearchSchema, createOrgSchema, createPublicOrgSchema, updateOrgSchema } from '../schemas/organizations.schema';
 import * as orgsService from '../services/organizations.service';
 import * as orgFollowsService from '../services/org-follows.service';
+import { logger } from '../lib/logger';
 import { success } from '../utils/shape';
 
 const router = Router();
@@ -326,5 +327,50 @@ router.post(
     }
   },
 );
+
+// ─── POST /organizations/:orgId/interest — student registers as volunteer ─────
+router.post('/organizations/:orgId/interest', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.registerInterest(
+      req.params.orgId as string,
+      req.user!.id,
+    );
+    res.json(success(result));
+  } catch (err: any) {
+    if (err?.name === 'NotFoundError') {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+    logger.error(err, 'register_interest_failed');
+    next(err);
+  }
+});
+
+// ─── DELETE /organizations/:orgId/interest — student unregisters ──────────────
+router.delete('/organizations/:orgId/interest', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.unregisterInterest(
+      req.params.orgId as string,
+      req.user!.id,
+    );
+    res.json(success(result));
+  } catch (err) {
+    logger.error(err, 'unregister_interest_failed');
+    next(err);
+  }
+});
+
+// ─── GET /organizations/:orgId/interest/status ────────────────────────────────
+router.get('/organizations/:orgId/interest/status', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.getInterestStatus(
+      req.params.orgId as string,
+      req.user!.id,
+    );
+    res.json(success(result));
+  } catch (err) {
+    logger.error(err, 'interest_status_failed');
+    next(err);
+  }
+});
 
 export default router;
