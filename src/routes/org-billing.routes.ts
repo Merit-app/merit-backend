@@ -17,6 +17,14 @@ const ORG_PRICES = {
   enterprise_yearly: () => env.ORG_ENTERPRISE_YEARLY_PRICE_ID,
 } as const;
 
+// Log configured org price IDs at startup so Railway logs confirm the env vars are set
+logger.info({
+  org_pro_monthly: env.ORG_PRO_MONTHLY_PRICE_ID ?? '⚠️  NOT SET',
+  org_pro_yearly: env.ORG_PRO_YEARLY_PRICE_ID ?? '⚠️  NOT SET',
+  org_enterprise_monthly: env.ORG_ENTERPRISE_MONTHLY_PRICE_ID ?? '⚠️  NOT SET',
+  org_enterprise_yearly: env.ORG_ENTERPRISE_YEARLY_PRICE_ID ?? '⚠️  NOT SET',
+}, 'org_billing_price_ids');
+
 // Ensure a Stripe customer exists for an org, return customerId
 async function getOrCreateOrgCustomer(orgId: string, orgName: string, contactEmail: string): Promise<string> {
   const { data: org } = await supabaseAdmin
