@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '../config/supabase';
-import { NotFoundError, ForbiddenError } from '../lib/errors';
+import { AppError, NotFoundError, ForbiddenError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import * as propublica from './propublica.service';
 import type { CreateOrgInput, CreatePublicOrgInput, UpdateOrgInput } from '../schemas/organizations.schema';
@@ -207,8 +207,18 @@ export async function createOrgByUser(
     .single();
 
   if (orgError || !org) {
-    logger.error({ orgError, userId }, 'create_org_failed');
-    throw new Error('Failed to create organization');
+    // Surface the real Postgres error (code + message) so the cause is visible in
+    // logs and — in non-production — in the API response. Common causes: a CHECK
+    // constraint on category, a missing column, or a unique-slug conflict.
+    logger.error({ orgError, userId, input }, 'create_org_failed');
+    throw new AppError(
+      'create_org_failed',
+      orgError?.message
+        ? `Failed to create organization: ${orgError.message}`
+        : 'Failed to create organization',
+      500,
+      orgError ? { code: orgError.code, hint: orgError.hint, details: orgError.details } : undefined,
+    );
   }
 
   // Auto-approve creator as owner
