@@ -211,11 +211,29 @@ router.post(
         });
       }
 
-      const { data: user } = await supabaseAdmin
+      const { data: user, error: userErr } = await supabaseAdmin
         .from('users')
         .select('id, name, email, plan, avatar_url')
         .eq('id', authData.user.id)
-        .single();
+        .maybeSingle();
+
+      if (userErr || !user) {
+        // The org_admins row references this user_id, but the public.users row
+        // is missing or unreadable. Don't fail the login — fall back to the auth
+        // identity so the dashboard still loads. Logged for later data cleanup.
+        logger.warn({ userId: authData.user.id, userErr }, 'org_login_user_row_missing');
+      }
+
+      const safeUser = user ?? {
+        id: authData.user.id,
+        name:
+          (authData.user.user_metadata as any)?.name ??
+          authData.user.email?.split('@')[0] ??
+          'Org Admin',
+        email: authData.user.email ?? '',
+        plan: 'free',
+        avatar_url: null,
+      };
 
       const orgs = orgAdminRecords.map((r: any) => ({
         ...r.organizations,
@@ -224,7 +242,7 @@ router.post(
 
       return res.json(
         success({
-          user,
+          user: safeUser,
           orgs,
           defaultOrgId: orgs[0]?.id,
           accessToken: authData.session?.access_token,
