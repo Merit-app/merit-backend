@@ -250,58 +250,63 @@ export async function getAdminOrgs(userId: string) {
 /** Full dashboard data for an org, verified admin only */
 export async function getOrgDashboard(orgId: string, userId: string) {
   // Verify admin and pull onboarding state in one query
-  const { data: adminRecord } = await supabaseAdmin
+  const { data: adminRecord, error: adminErr } = await supabaseAdmin
     .from('org_admins')
     .select('role, onboarding_completed')
     .eq('org_id', orgId)
     .eq('user_id', userId)
     .maybeSingle();
 
+  if (adminErr) logger.error({ adminErr, orgId, userId }, 'org_dashboard_admin_lookup_error');
   if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
 
-  logger.info({ orgId, userId }, 'org_dashboard_query_start');
+  logger.info({ orgId, userId, role: adminRecord.role }, 'org_dashboard_query_start');
 
-  const [{ data: org }, { data: sessions }, { data: admins }] = await Promise.all([
+  const [orgResult, sessionsResult, adminsResult] = await Promise.all([
     supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
     supabaseAdmin
       .from('sessions')
-      .select('id, date, hours, status, activity, user_id, users!sessions_user_id_fkey(id, name, school, grade)')
+      .select('id, date, hours, status, activity, user_id, users(id, name, school, grade)')
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('date', { ascending: false })
       .limit(100),
     supabaseAdmin
       .from('org_admins')
-      .select('role, users!org_admins_user_id_fkey(id, name, email, avatar_url)')
+      .select('role, user_id, users(id, name, email, avatar_url)')
       .eq('org_id', orgId),
   ]);
 
-  const sessionList = sessions ?? [];
+  if (orgResult.error) logger.error({ err: orgResult.error, orgId }, 'org_dashboard_org_query_error');
+  if (sessionsResult.error) logger.error({ err: sessionsResult.error, orgId }, 'org_dashboard_sessions_query_error');
+  if (adminsResult.error) logger.error({ err: adminsResult.error, orgId }, 'org_dashboard_admins_query_error');
+
+  const org = orgResult.data;
+  const sessionList = sessionsResult.data ?? [];
+  const admins = adminsResult.data ?? [];
+
   const verifiedList = sessionList.filter((s: any) => s.status === 'verified');
   const totalHours = verifiedList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
   const sessionStudentIds = new Set(
-    sessionList.map((s: any) => s.user_id ?? (s as any).users?.id).filter(Boolean),
+    sessionList.map((s: any) => s.user_id).filter(Boolean),
   );
 
   // Also count students who registered interest but have no sessions yet
-  // (fails silently if table doesn't exist yet)
   let interestedOnlyCount = 0;
   try {
     const { data: interested } = await supabaseAdmin
       .from('org_volunteer_interests')
-      .select('users!org_volunteer_interests_user_id_fkey(id)')
+      .select('user_id')
       .eq('org_id', orgId);
     interestedOnlyCount = (interested ?? [])
-      .filter((i: any) => {
-        const uid = i.users?.id;
-        return uid && !sessionStudentIds.has(uid);
-      }).length;
+      .filter((i: any) => i.user_id && !sessionStudentIds.has(i.user_id))
+      .length;
   } catch { /* table may not exist yet — silent */ }
 
   const verifiedSessions = verifiedList.length;
   const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
 
-  logger.info({ orgId, orgFound: !!org, sessions: sessionList.length, interestedOnly: interestedOnlyCount }, 'org_dashboard_result');
+  logger.info({ orgId, orgFound: !!org, sessions: sessionList.length, admins: admins.length, interestedOnly: interestedOnlyCount }, 'org_dashboard_result');
 
   return {
     org,
@@ -313,7 +318,7 @@ export async function getOrgDashboard(orgId: string, userId: string) {
       pendingSessions,
     },
     recentSessions: sessionList.slice(0, 20),
-    admins: admins ?? [],
+    admins,
     userRole: adminRecord.role,
     onboardingCompleted: (adminRecord as any).onboarding_completed ?? false,
   };
@@ -466,7 +471,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
-    .select('id, date, hours, status, activity, users!sessions_user_id_fkey(id, name, school, grade, username, avatar_url)')
+    .select('id, date, hours, status, activity, user_id, users(id, name, school, grade, username, avatar_url)')
     .eq('org_id', orgId)
     .is('deleted_at', null)
     .order('date', { ascending: false });
