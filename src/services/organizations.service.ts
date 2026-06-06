@@ -238,12 +238,12 @@ export async function createOrgByUser(
 export async function getAdminOrgs(userId: string) {
   const { data } = await supabaseAdmin
     .from('org_admins')
-    .select('role, organizations(id, name, slug, category, city, claimed)')
+    .select('role, organizations(id, name, slug, category, city, claimed, logo_url)')
     .eq('user_id', userId);
 
   return (data ?? []).map((row: any) => ({
     ...(row.organizations ?? {}),
-    userRole: row.role,
+    role: row.role,
   })).filter((o: any) => o.id);
 }
 
