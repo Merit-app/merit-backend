@@ -76,7 +76,7 @@ async function createMeritAccount(email: string, password: string, name: string)
   });
   if (userError) {
     if (SUPABASE_MODE !== 'mock') await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
-    throw new Error('Failed to create user profile');
+    throw new Error(`Failed to create user profile: ${userError.message}`);
   }
   return authUserId;
 }
