@@ -65,10 +65,10 @@ async function createMeritAccount(email: string, password: string, name: string)
 
   const parts = name.trim().split(/\s+/);
   const username = await generateUsername(parts[0] ?? name, parts.slice(1).join(' ') || (parts[0] ?? name));
+  // NOTE: email_lower is a GENERATED column — do not insert it.
   const { error: userError } = await supabaseAdmin.from('users').insert({
     id: authUserId,
     email,
-    email_lower: emailLower,
     name,
     username,
     plan: 'free',
@@ -410,7 +410,7 @@ router.post(
         .insert({
           id: authUserId,
           email: body.email,
-          email_lower: body.email.toLowerCase(),
+          // email_lower is a GENERATED column — must not be inserted
           name: body.name,
           username,
           plan: 'free',
