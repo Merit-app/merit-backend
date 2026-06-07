@@ -461,6 +461,62 @@ export async function uploadOrgImage(params: {
   return { url: publicUrl };
 }
 
+// ─── Delete organization (owner only) ─────────────────────────────────────────
+
+/** Permanently delete an org and all its related rows. Owner only. */
+export async function deleteOrg(orgId: string, userId: string) {
+  const { data: adminRecord } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
+  if (adminRecord.role !== 'owner') throw new ForbiddenError('Only the owner can delete this organization');
+
+  // Detach sessions (keep volunteers' verified hours; just unlink from the org)
+  await supabaseAdmin.from('sessions').update({ org_id: null }).eq('org_id', orgId);
+
+  // Delete dependent rows explicitly (covers tables that may not cascade).
+  // Each is best-effort: a missing/already-empty table must not block the delete.
+  const safeDelete = async (table: string, column: string) => {
+    try {
+      await supabaseAdmin.from(table).delete().eq(column, orgId);
+    } catch (err) {
+      logger.warn({ err, table, orgId }, 'delete_org_dependent_failed');
+    }
+  };
+
+  // event_signups are keyed by event_id, so clear them via the org's events first
+  try {
+    const { data: events } = await supabaseAdmin.from('org_events').select('id').eq('org_id', orgId);
+    const eventIds = (events ?? []).map((e: any) => e.id);
+    if (eventIds.length) {
+      await supabaseAdmin.from('event_signups').delete().in('event_id', eventIds);
+    }
+  } catch (err) {
+    logger.warn({ err, orgId }, 'delete_org_event_signups_failed');
+  }
+
+  await safeDelete('org_events', 'org_id');
+  await safeDelete('org_messages', 'org_id');
+  await safeDelete('org_invites', 'org_id');
+  await safeDelete('org_admins', 'org_id');
+  await safeDelete('org_claims', 'org_id');
+  await safeDelete('org_volunteer_interests', 'org_id');
+  await safeDelete('user_org_follows', 'org_id');
+
+  const { error } = await supabaseAdmin.from('organizations').delete().eq('id', orgId);
+  if (error) {
+    logger.error({ error, orgId, userId }, 'delete_org_failed');
+    throw new AppError('delete_org_failed', `Failed to delete organization: ${error.message}`, 500);
+  }
+
+  logger.info({ orgId, userId }, 'org_deleted');
+  return { deleted: true };
+}
+
 // ─── Org admin helper ─────────────────────────────────────────────────────────
 
 async function requireOrgAdmin(orgId: string, userId: string): Promise<string> {

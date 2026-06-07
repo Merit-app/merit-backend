@@ -204,6 +204,17 @@ router.patch('/organizations/:id', requireAuth, async (req: Request, res: Respon
   }
 });
 
+// ─── DELETE /organizations/:id ────────────────────────────────────────────────
+// Permanently delete an org. Owner only (enforced in the service).
+router.delete('/organizations/:id', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const result = await orgsService.deleteOrg(req.params.id as string, req.user!.id);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── POST /organizations/:id/follow ──────────────────────────────────────────
 router.post('/organizations/:id/follow', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
