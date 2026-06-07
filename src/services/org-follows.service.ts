@@ -143,7 +143,28 @@ export async function discoverOrgs(userId: string, opts: {
     );
 
   if (opts.category) {
-    query = (query as any).ilike('category', `%${opts.category}%`);
+    // Orgs store category as NTEE codes (e.g. "B61Z", "K31") from ProPublica, or
+    // as a human label on internally-created orgs. Map the frontend's filter chip
+    // to the matching NTEE major-group prefix(es) AND match the label directly.
+    const CATEGORY_NTEE: Record<string, string[]> = {
+      'Food & Hunger': ['K'],
+      'Education & Tutoring': ['B'],
+      'Environment & Nature': ['C'],
+      'Animal Welfare': ['D'],
+      'Health & Wellness': ['E', 'F', 'G', 'H'],
+      'Community & Social': ['P', 'S', 'T', 'W'],
+      'Youth & Children': ['O'],
+      'Arts & Culture': ['A'],
+      'Emergency & Crisis': ['M', 'I'],
+    };
+    const prefixes = CATEGORY_NTEE[opts.category];
+    if (prefixes && prefixes.length) {
+      const ors = prefixes.map((p) => `category.ilike.${p}%`);
+      ors.push(`category.ilike.%${opts.category}%`); // internal orgs with the literal label
+      query = (query as any).or(ors.join(','));
+    } else {
+      query = (query as any).ilike('category', `%${opts.category}%`);
+    }
   }
   if (opts.q) {
     query = (query as any).ilike('name', `%${opts.q}%`);
