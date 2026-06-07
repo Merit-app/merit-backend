@@ -645,13 +645,22 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   const createdAtById = new Map<string, string>();
   for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
 
-  const { data: interestUsers } = await supabaseAdmin
+  const { data: interestUsers, error: iuErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, school, grade, username, avatar_url')
+    .select('*')
     .in('id', interestIds);
 
+  if (iuErr) logger.warn({ iuErr, orgId }, 'org_volunteers_interest_users_failed');
+
   const interestOnly = (interestUsers ?? []).map((u: any) => ({
-    student: u,
+    student: {
+      id: u.id,
+      name: u.name,
+      school: u.school ?? null,
+      grade: u.grade ?? null,
+      username: u.username ?? null,
+      avatar_url: u.avatar_url ?? null,
+    },
     sessions: [] as any[],
     totalHours: 0,
     verifiedHours: 0,
