@@ -618,7 +618,7 @@ router.post(
         return res.status(400).json({ error: 'Invalid input', details: err.errors });
       }
       logger.error(err, 'org_create_error');
-      next(err);
+      return res.status(500).json({ error: 'org_create_failed', message: String(err?.message ?? err) });
     }
   },
 );
