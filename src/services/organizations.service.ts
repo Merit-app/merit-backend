@@ -640,24 +640,18 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     .map((i: any) => i.user_id as string)
     .filter((id: string) => id && !studentMap.has(id));
 
-  // TEMP debug
-  throw new Error('DBG ' + JSON.stringify({
-    sessionsLen: (sessions ?? []).length,
-    studentMapSize: studentMap.size,
-    studentMapKeys: Array.from(studentMap.keys()),
-    interestsLen: (interests ?? []).length,
-    interestIds,
-  }));
-
   if (interestIds.length === 0) return sessionVolunteers;
 
   const createdAtById = new Map<string, string>();
   for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
 
-  const { data: interestUsers } = await supabaseAdmin
+  const { data: interestUsers, error: iuErr } = await supabaseAdmin
     .from('users')
     .select('id, name, school, grade, username, avatar_url')
     .in('id', interestIds);
+
+  // TEMP debug
+  throw new Error('DBG2 ' + JSON.stringify({ iuErr: iuErr?.message ?? null, found: (interestUsers ?? []).length }));
 
   const interestOnly = (interestUsers ?? []).map((u: any) => ({
     student: u,
