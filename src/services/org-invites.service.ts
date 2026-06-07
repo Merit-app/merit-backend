@@ -123,9 +123,23 @@ export async function acceptInvite(params: {
 
   const org = (invite as any).organizations;
 
+  // Never downgrade an existing higher role. If the user is already a member with
+  // an equal-or-higher role (e.g. an owner accepting an admin invite), keep it.
+  const ROLE_RANK: Record<string, number> = { coordinator: 0, admin: 1, owner: 2 };
+  const { data: existing } = await supabaseAdmin
+    .from('org_admins')
+    .select('role')
+    .eq('org_id', org.id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const existingRank = existing ? (ROLE_RANK[existing.role] ?? -1) : -1;
+  const inviteRank = ROLE_RANK[invite.role] ?? 0;
+  const finalRole = existingRank > inviteRank ? existing!.role : invite.role;
+
   const { error: adminError } = await supabaseAdmin
     .from('org_admins')
-    .upsert({ org_id: org.id, user_id: userId, role: invite.role });
+    .upsert({ org_id: org.id, user_id: userId, role: finalRole }, { onConflict: 'org_id,user_id' });
 
   if (adminError) throw adminError;
 
