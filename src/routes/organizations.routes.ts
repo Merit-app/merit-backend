@@ -84,6 +84,16 @@ router.get('/organizations/:orgId/volunteers', requireAuth, async (req: Request,
   }
 });
 
+// ─── TEMP GET /organizations/:orgId/volunteers-debug ──────────────────────────
+router.get('/organizations/:orgId/volunteers-debug', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await orgsService.debugOrgVolunteers(req.params.orgId as string);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── POST /organizations/:orgId/sessions/:sessionId/verify ────────────────────
 router.post('/organizations/:orgId/sessions/:sessionId/verify', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {

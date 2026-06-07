@@ -662,6 +662,19 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   return [...sessionVolunteers, ...interestOnly];
 }
 
+/** TEMP debug: raw interest data for an org, to diagnose volunteer-count mismatch. */
+export async function debugOrgVolunteers(orgId: string) {
+  const { data: interests, error: ie } = await supabaseAdmin
+    .from('org_volunteer_interests')
+    .select('user_id, created_at')
+    .eq('org_id', orgId);
+  const ids = (interests ?? []).map((i: any) => i.user_id);
+  const { data: users } = ids.length
+    ? await supabaseAdmin.from('users').select('id, name, email').in('id', ids)
+    : { data: [] };
+  return { interestErr: ie?.message ?? null, interestRows: interests ?? [], userIds: ids, usersFound: users ?? [] };
+}
+
 // ─── Verify / dispute session as org ─────────────────────────────────────────
 
 export async function verifySessionAsOrg(orgId: string, sessionId: string, userId: string) {
