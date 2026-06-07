@@ -624,11 +624,11 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     .sort((a, b) => b.verifiedHours - a.verifiedHours);
 
   // Append students who registered interest but have no sessions yet.
-  // Use a plain users(...) join (no brittle FK-name hint) so this never throws
-  // and silently drops interested volunteers.
-  const { data: interested, error: interestErr } = await supabaseAdmin
+  // Fetch interests and their users in TWO plain queries — no embedded join,
+  // which was returning null and silently dropping interested volunteers.
+  const { data: interests, error: interestErr } = await supabaseAdmin
     .from('org_volunteer_interests')
-    .select('created_at, user_id, users(id, name, school, grade, username, avatar_url)')
+    .select('user_id, created_at')
     .eq('org_id', orgId);
 
   if (interestErr) {
@@ -636,17 +636,28 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     return sessionVolunteers;
   }
 
-  const interestOnly = (interested ?? [])
-    .map((i: any) => ({ ...i, u: i.users ?? null }))
-    .filter((i: any) => i.u?.id && !studentMap.has(i.u.id))
-    .map((i: any) => ({
-      student: i.u,
-      sessions: [] as any[],
-      totalHours: 0,
-      verifiedHours: 0,
-      lastActive: i.created_at as string,
-      isInterested: true,
-    }));
+  const interestIds = (interests ?? [])
+    .map((i: any) => i.user_id as string)
+    .filter((id: string) => id && !studentMap.has(id));
+
+  if (interestIds.length === 0) return sessionVolunteers;
+
+  const createdAtById = new Map<string, string>();
+  for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
+
+  const { data: interestUsers } = await supabaseAdmin
+    .from('users')
+    .select('id, name, school, grade, username, avatar_url')
+    .in('id', interestIds);
+
+  const interestOnly = (interestUsers ?? []).map((u: any) => ({
+    student: u,
+    sessions: [] as any[],
+    totalHours: 0,
+    verifiedHours: 0,
+    lastActive: createdAtById.get(u.id) ?? null,
+    isInterested: true,
+  }));
 
   return [...sessionVolunteers, ...interestOnly];
 }
