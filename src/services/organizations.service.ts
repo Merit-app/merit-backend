@@ -645,13 +645,10 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   const createdAtById = new Map<string, string>();
   for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
 
-  const { data: interestUsers, error: iuErr } = await supabaseAdmin
+  const { data: interestUsers } = await supabaseAdmin
     .from('users')
     .select('id, name, school, grade, username, avatar_url')
     .in('id', interestIds);
-
-  // TEMP debug
-  throw new Error('DBG2 ' + JSON.stringify({ iuErr: iuErr?.message ?? null, found: (interestUsers ?? []).length }));
 
   const interestOnly = (interestUsers ?? []).map((u: any) => ({
     student: u,
@@ -663,19 +660,6 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   }));
 
   return [...sessionVolunteers, ...interestOnly];
-}
-
-/** TEMP debug: raw interest data for an org, to diagnose volunteer-count mismatch. */
-export async function debugOrgVolunteers(orgId: string) {
-  const { data: interests, error: ie } = await supabaseAdmin
-    .from('org_volunteer_interests')
-    .select('user_id, created_at')
-    .eq('org_id', orgId);
-  const ids = (interests ?? []).map((i: any) => i.user_id);
-  const { data: users } = ids.length
-    ? await supabaseAdmin.from('users').select('id, name, email').in('id', ids)
-    : { data: [] };
-  return { interestErr: ie?.message ?? null, interestRows: interests ?? [], userIds: ids, usersFound: users ?? [] };
 }
 
 // ─── Verify / dispute session as org ─────────────────────────────────────────
