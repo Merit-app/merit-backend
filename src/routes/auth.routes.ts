@@ -66,12 +66,16 @@ async function createMeritAccount(email: string, password: string, name: string)
   const parts = name.trim().split(/\s+/);
   const username = await generateUsername(parts[0] ?? name, parts.slice(1).join(' ') || (parts[0] ?? name));
   // NOTE: email_lower is a GENERATED column — do not insert it.
+  // Org accounts have no birthdate; treat them as adult.
   const { error: userError } = await supabaseAdmin.from('users').insert({
     id: authUserId,
     email,
     name,
     username,
     plan: 'free',
+    age_tier: 'adult',
+    is_minor: false,
+    parental_consent_received: true,
     onboarding_completed: true,
   });
   if (userError) {
@@ -414,6 +418,9 @@ router.post(
           name: body.name,
           username,
           plan: 'free',
+          age_tier: 'adult',
+          is_minor: false,
+          parental_consent_received: true,
           onboarding_completed: true, // skip student onboarding for org admins
         });
 
