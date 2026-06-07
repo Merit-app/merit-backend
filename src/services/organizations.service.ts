@@ -244,6 +244,47 @@ export async function createOrgByUser(
   return org;
 }
 
+/** Create just the organization record (no owner attached). Used by the
+ *  org-first signup flow, which creates the owner account separately. */
+export async function createOrgRecord(input: CreatePublicOrgInput) {
+  const slugify = (await import('slugify')).default;
+  const { nanoid } = await import('nanoid');
+  const baseSlug = slugify(input.name, { lower: true, strict: true }) || 'org';
+  const slug = `${baseSlug}-${nanoid(6)}`;
+
+  const { data: org, error: orgError } = await supabaseAdmin
+    .from('organizations')
+    .insert({
+      name: sanitize(input.name),
+      category: input.category,
+      city: sanitize(input.city),
+      state: input.province ?? null,
+      country: input.country,
+      slug,
+      website_url: input.websiteUrl || null,
+      description: sanitize(input.description),
+      contact_email: input.contactEmail || null,
+      contact_phone: input.contactPhone || null,
+      is_recruiting: input.isRecruiting,
+      claimed: true,
+      claimed_at: new Date().toISOString(),
+      org_plan: 'free',
+    })
+    .select('id, name, slug, category, city')
+    .single();
+
+  if (orgError || !org) {
+    logger.error({ orgError, input }, 'create_org_record_failed');
+    throw new AppError(
+      'create_org_failed',
+      orgError?.message ? `Failed to create organization: ${orgError.message}` : 'Failed to create organization',
+      500,
+      orgError ? { code: orgError.code, hint: orgError.hint, details: orgError.details } : undefined,
+    );
+  }
+  return org;
+}
+
 /** Get all orgs that the current user is an admin of */
 export async function getAdminOrgs(userId: string) {
   const { data } = await supabaseAdmin

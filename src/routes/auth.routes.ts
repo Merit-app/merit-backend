@@ -14,12 +14,72 @@ import {
   resendConfirmationSchema,
 } from '../schemas/auth.schema';
 import * as authService from '../services/auth.service';
+import * as orgsService from '../services/organizations.service';
+import * as invitesService from '../services/org-invites.service';
 import { success } from '../utils/shape';
 import { generateUsername } from '../services/usernames.service';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 
 const router = Router();
+
+/**
+ * Create a Merit auth user (+ public.users row) with the given credentials.
+ * Throws { code: 'EMAIL_EXISTS' } if the email is already registered.
+ * One Merit account per email — used by the org-first signup flow.
+ */
+async function createMeritAccount(email: string, password: string, name: string): Promise<string> {
+  const emailLower = email.toLowerCase();
+
+  const { data: existing } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('email_lower', emailLower)
+    .maybeSingle();
+  if (existing) {
+    const e: any = new Error('An account with this email already exists. Please sign in instead.');
+    e.code = 'EMAIL_EXISTS';
+    throw e;
+  }
+
+  let authUserId: string;
+  if (SUPABASE_MODE === 'mock') {
+    const { data, error } = await supabaseAuth.auth.signUp({ email, password, options: { data: { name } } });
+    if (error || !data?.user) throw new Error(error?.message ?? 'Failed to create account');
+    authUserId = data.user.id;
+  } else {
+    const projectUrl = (env.SUPABASE_URL ?? '').replace(/\/+$/, '').replace(/\/(rest|auth)\/v\d+.*$/, '');
+    const r = await fetch(`${projectUrl}/auth/v1/admin/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+        'apikey': env.SUPABASE_SERVICE_ROLE_KEY!,
+      },
+      body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { name } }),
+    });
+    const b = await r.json() as any;
+    if (!r.ok || !b?.id) throw new Error(b?.msg ?? b?.message ?? 'Failed to create account');
+    authUserId = b.id as string;
+  }
+
+  const parts = name.trim().split(/\s+/);
+  const username = await generateUsername(parts[0] ?? name, parts.slice(1).join(' ') || (parts[0] ?? name));
+  const { error: userError } = await supabaseAdmin.from('users').insert({
+    id: authUserId,
+    email,
+    email_lower: emailLower,
+    name,
+    username,
+    plan: 'free',
+    onboarding_completed: true,
+  });
+  if (userError) {
+    if (SUPABASE_MODE !== 'mock') await supabaseAdmin.auth.admin.deleteUser(authUserId).catch(() => {});
+    throw new Error('Failed to create user profile');
+  }
+  return authUserId;
+}
 
 // POST /auth/signup
 router.post(
@@ -461,6 +521,103 @@ router.post(
       return res.json(success({ changed: true }));
     } catch (err) {
       logger.error(err, 'change_password_error');
+      next(err);
+    }
+  },
+);
+
+// POST /auth/org/create — org-first signup: create a Merit account AND an org in
+// one step, making the new account the owner. Optionally invites admins by email.
+// No student profile/onboarding required — one Merit account works everywhere.
+router.post(
+  '/auth/org/create',
+  ipRateLimit('signup', 5, 1),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const schema = z.object({
+        email: z.string().email(),
+        password: z.string().min(8, 'Password must be at least 8 characters'),
+        // org details
+        name: z.string().min(2).max(100),            // org name
+        category: z.string().min(1).max(50),
+        city: z.string().min(2).max(100),
+        province: z.string().max(50).optional(),
+        country: z.string().default('Canada'),
+        websiteUrl: z.string().url().optional().or(z.literal('')),
+        description: z.string().max(500).optional(),
+        contactPhone: z.string().max(20).optional(),
+        isRecruiting: z.boolean().default(false),
+        adminEmails: z.array(z.string().email()).max(20).optional(),
+      });
+      const body = schema.parse(req.body);
+
+      // 1) Create the owner's Merit account
+      let ownerId: string;
+      try {
+        ownerId = await createMeritAccount(body.email, body.password, body.name);
+      } catch (e: any) {
+        if (e?.code === 'EMAIL_EXISTS') {
+          return res.status(409).json({ error: e.message, code: 'EMAIL_EXISTS' });
+        }
+        throw e;
+      }
+
+      // 2) Create the org record
+      const org = await orgsService.createOrgRecord({
+        name: body.name,
+        category: body.category,
+        city: body.city,
+        province: body.province,
+        country: body.country,
+        websiteUrl: body.websiteUrl,
+        description: body.description,
+        contactEmail: body.email,
+        contactPhone: body.contactPhone,
+        isRecruiting: body.isRecruiting,
+      });
+
+      // 3) Make the account the owner
+      await supabaseAdmin.from('org_admins').insert({
+        org_id: org.id,
+        user_id: ownerId,
+        role: 'owner',
+        onboarding_completed: false,
+      });
+
+      // 4) Invite any admins (new users are prompted to create a Merit account on accept)
+      const invited: string[] = [];
+      for (const ae of (body.adminEmails ?? [])) {
+        if (ae.toLowerCase() === body.email.toLowerCase()) continue;
+        try {
+          await invitesService.createInvite({ orgId: org.id, invitedBy: ownerId, email: ae, role: 'admin' });
+          invited.push(ae);
+        } catch (err) {
+          logger.warn({ err, email: ae, orgId: org.id }, 'org_create_invite_failed');
+        }
+      }
+
+      // 5) Sign the owner in (anon client — never the admin client)
+      const { data: session } = await supabaseAuth.auth.signInWithPassword({
+        email: body.email,
+        password: body.password,
+      });
+
+      const orgSummary = { id: org.id, name: org.name, slug: org.slug, role: 'owner' as const };
+      return res.status(201).json(success({
+        user: { id: ownerId, name: body.name, email: body.email, plan: 'free' },
+        org: orgSummary,
+        orgs: [orgSummary],
+        defaultOrgId: org.id,
+        invited,
+        accessToken: session?.session?.access_token ?? null,
+        refreshToken: session?.session?.refresh_token ?? null,
+        expiresAt: session?.session?.expires_at ?? null,
+      }));
+    } catch (err: any) {
+      if (err?.name === 'ZodError') {
+        return res.status(400).json({ error: 'Invalid input', details: err.errors });
+      }
+      logger.error(err, 'org_create_error');
       next(err);
     }
   },
