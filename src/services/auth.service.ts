@@ -82,7 +82,7 @@ export async function signup(input: {
   let authUserId: string;
 
   if (SUPABASE_MODE === 'mock') {
-    const { data: mockAuthData, error: mockAuthError } = await supabaseAdmin.auth.signUp({
+    const { data: mockAuthData, error: mockAuthError } = await supabaseAuth.auth.signUp({
       email: input.email,
       password: input.password,
       options: { data: { name: input.name } },

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { validate } from '../middleware/validate.middleware';
 import { requireAuth } from '../middleware/auth.middleware';
 import { ipRateLimit } from '../middleware/rate-limit.middleware';
-import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
+import { supabaseAdmin, supabaseAuth, SUPABASE_MODE } from '../config/supabase';
 import {
   signupSchema,
   loginSchema,
@@ -190,8 +190,12 @@ router.post(
       });
       const { email, password } = schema.parse(req.body);
 
+      // Use the ANON client for sign-in. Calling signInWithPassword on the
+      // service-role client contaminates its shared session with the user's JWT,
+      // causing all later DB writes in the process to run under RLS as the user
+      // (silently affecting 0 rows). See config/supabase.ts.
       const { data: authData, error: authError } =
-        await supabaseAdmin.auth.signInWithPassword({ email, password });
+        await supabaseAuth.auth.signInWithPassword({ email, password });
 
       if (authError || !authData?.user) {
         return res.status(401).json({ error: 'Invalid credentials' });
@@ -303,7 +307,7 @@ router.post(
       // Create Supabase auth user via GoTrue admin API (same pattern as auth.service.ts)
       let authUserId: string;
       if (SUPABASE_MODE === 'mock') {
-        const { data: mockData, error: mockErr } = await supabaseAdmin.auth.signUp({
+        const { data: mockData, error: mockErr } = await supabaseAuth.auth.signUp({
           email: body.email,
           password: body.password,
           options: { data: { name: body.name } },
@@ -371,9 +375,9 @@ router.post(
           void err; // non-fatal — account still created
         });
 
-      // Sign in immediately to return tokens
+      // Sign in immediately to return tokens (anon client — never the admin client)
       const { data: sessionData, error: signInError } =
-        await supabaseAdmin.auth.signInWithPassword({
+        await supabaseAuth.auth.signInWithPassword({
           email: body.email,
           password: body.password,
         });
@@ -429,8 +433,8 @@ router.post(
         return res.status(400).json({ error: 'User email not found' });
       }
 
-      // Verify current password by attempting sign-in
-      const { error: signInError } = await supabaseAdmin.auth.signInWithPassword({
+      // Verify current password by attempting sign-in (anon client — never admin)
+      const { error: signInError } = await supabaseAuth.auth.signInWithPassword({
         email: userEmail,
         password: currentPassword,
       });
