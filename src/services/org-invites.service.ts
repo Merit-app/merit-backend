@@ -148,5 +148,5 @@ export async function acceptInvite(params: {
     .update({ accepted_at: new Date().toISOString() })
     .eq('token', token);
 
-  return { orgId: org.id, orgSlug: org.slug, role: invite.role };
+  return { orgId: org.id, orgSlug: org.slug, role: finalRole };
 }
