@@ -475,8 +475,16 @@ export async function deleteOrg(orgId: string, userId: string) {
   if (!adminRecord) throw new ForbiddenError('Not an admin of this organization');
   if (adminRecord.role !== 'owner') throw new ForbiddenError('Only the owner can delete this organization');
 
-  // Detach sessions (keep volunteers' verified hours; just unlink from the org)
-  await supabaseAdmin.from('sessions').update({ org_id: null }).eq('org_id', orgId);
+  // Detach sessions + authenticators (keep volunteers' verified hours; just
+  // unlink from the org). Requires org_id to be nullable on these tables —
+  // see migration 020.
+  const { error: sessErr } = await supabaseAdmin.from('sessions').update({ org_id: null }).eq('org_id', orgId);
+  if (sessErr) logger.warn({ sessErr, orgId }, 'delete_org_detach_sessions_failed');
+  try {
+    await supabaseAdmin.from('authenticators').update({ org_id: null }).eq('org_id', orgId);
+  } catch (err) {
+    logger.warn({ err, orgId }, 'delete_org_detach_authenticators_failed');
+  }
 
   // Delete dependent rows explicitly (covers tables that may not cascade).
   // Each is best-effort: a missing/already-empty table must not block the delete.
