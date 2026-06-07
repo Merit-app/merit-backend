@@ -623,29 +623,32 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   const sessionVolunteers = Array.from(studentMap.values())
     .sort((a, b) => b.verifiedHours - a.verifiedHours);
 
-  // Append students who registered interest but have no sessions yet
-  // (fails silently if the table doesn't exist yet)
-  try {
-    const { data: interested } = await supabaseAdmin
-      .from('org_volunteer_interests')
-      .select('created_at, users!org_volunteer_interests_user_id_fkey(id, name, school, grade, username, avatar_url)')
-      .eq('org_id', orgId);
+  // Append students who registered interest but have no sessions yet.
+  // Use a plain users(...) join (no brittle FK-name hint) so this never throws
+  // and silently drops interested volunteers.
+  const { data: interested, error: interestErr } = await supabaseAdmin
+    .from('org_volunteer_interests')
+    .select('created_at, user_id, users(id, name, school, grade, username, avatar_url)')
+    .eq('org_id', orgId);
 
-    const interestOnly = (interested ?? [])
-      .filter((i: any) => i.users?.id && !studentMap.has(i.users.id))
-      .map((i: any) => ({
-        student: i.users,
-        sessions: [] as any[],
-        totalHours: 0,
-        verifiedHours: 0,
-        lastActive: i.created_at as string,
-        isInterested: true,
-      }));
-
-    return [...sessionVolunteers, ...interestOnly];
-  } catch {
+  if (interestErr) {
+    logger.warn({ interestErr, orgId }, 'org_volunteers_interest_query_failed');
     return sessionVolunteers;
   }
+
+  const interestOnly = (interested ?? [])
+    .map((i: any) => ({ ...i, u: i.users ?? null }))
+    .filter((i: any) => i.u?.id && !studentMap.has(i.u.id))
+    .map((i: any) => ({
+      student: i.u,
+      sessions: [] as any[],
+      totalHours: 0,
+      verifiedHours: 0,
+      lastActive: i.created_at as string,
+      isInterested: true,
+    }));
+
+  return [...sessionVolunteers, ...interestOnly];
 }
 
 // ─── Verify / dispute session as org ─────────────────────────────────────────
