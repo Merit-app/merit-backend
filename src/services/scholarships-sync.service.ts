@@ -29,27 +29,16 @@ const FEEDS: {
   defaultCategories: string[];
   defaultLocation: string;
   label: string;
+  baseUrl?: string; // for resolving relative links in the feed
 }[] = [
   {
-    url: 'https://www.educanada.ca/scholarships-bourses/news-nouvelles/rss-eng.aspx',
+    // Atom feed — links are relative, needs baseUrl prefix
+    url: 'https://www.educanada.ca/scholarships-bourses/rss/news-nouvelles_eng.xml',
     source: 'educanada',
     defaultCategories: ['education', 'leadership'],
     defaultLocation: 'Canada',
     label: 'EduCanada',
-  },
-  {
-    url: 'https://www.nserc-crsng.gc.ca/RSS/Funding-Financement_eng.xml',
-    source: 'nserc',
-    defaultCategories: ['stem', 'education'],
-    defaultLocation: 'Canada',
-    label: 'NSERC',
-  },
-  {
-    url: 'https://www.sshrc-crsh.gc.ca/news_room-salle_de_presse/latest_news-nouvelles_recentes/rss-eng.xml',
-    source: 'sshrc',
-    defaultCategories: ['education', 'social-impact'],
-    defaultLocation: 'Canada',
-    label: 'SSHRC',
+    baseUrl: 'https://www.educanada.ca',
   },
 ];
 
@@ -125,13 +114,21 @@ export async function syncScholarshipFeeds(): Promise<{
 
       for (const item of result.items ?? []) {
         const title = item.title?.trim();
-        const link  = item.link?.trim();
-        if (!title || !link) continue;
+        if (!title) continue;
 
-        const fullText = [title, item.contentSnippet ?? '', item.content ?? ''].join(' ');
-        const deadline = parseDeadline(item.contentSnippet ?? '');
-        const amount   = extractAmount(fullText);
-        const externalId = `${feed.source}-${Buffer.from(link).toString('base64').slice(0, 60)}`;
+        // Resolve relative links using the feed's baseUrl
+        let link = (item.link ?? (item as any).id ?? '').trim();
+        if (link && feed.baseUrl && !link.startsWith('http')) {
+          link = `${feed.baseUrl}${link.startsWith('/') ? '' : '/'}${link}`;
+        }
+        if (!link) continue;
+
+        // Use content or contentSnippet — the EduCanada feed uses <content>
+        const body = ((item as any).content ?? item.contentSnippet ?? '').trim();
+        const fullText = [title, body].join(' ');
+        const deadline  = parseDeadline(body);
+        const amount    = extractAmount(fullText);
+        const externalId = `${feed.source}-${Buffer.from(link).toString('base64').slice(0, 80)}`;
 
         rows.push({
           title:        title.slice(0, 200),
@@ -140,9 +137,9 @@ export async function syncScholarshipFeeds(): Promise<{
           deadline,
           is_rolling:   false,
           url:          link,
-          description:  (item.contentSnippet ?? '').slice(0, 1000) || null,
+          description:  body.slice(0, 1000) || null,
           requirements: null,
-          eligibility:  'Canadian students — see link for full eligibility',
+          eligibility:  'See link for full eligibility details',
           categories:   inferCategories(fullText, feed.defaultCategories),
           location:     feed.defaultLocation,
           renewable:    false,
