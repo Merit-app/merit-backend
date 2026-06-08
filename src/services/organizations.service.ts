@@ -586,7 +586,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
-    .select('id, date, hours, status, activity, user_id, users(id, name, school, grade, username, avatar_url)')
+    .select('id, date, hours, status, activity, user_id, users(id, name, email, phone, school, grade, username, avatar_url)')
     .eq('org_id', orgId)
     .is('deleted_at', null)
     .order('date', { ascending: false });
@@ -656,6 +656,8 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     student: {
       id: u.id,
       name: u.name,
+      email: u.email ?? null,
+      phone: u.phone ?? null,
       school: u.school ?? null,
       grade: u.grade ?? null,
       username: u.username ?? null,
