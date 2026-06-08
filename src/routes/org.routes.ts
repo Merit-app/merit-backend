@@ -6,6 +6,7 @@ import * as eventsService from '../services/org-events.service';
 import * as reportsService from '../services/org-reports.service';
 import * as messagesService from '../services/org-messages.service';
 import * as invitesService from '../services/org-invites.service';
+import * as scholarshipsService from '../services/scholarships.service';
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 
@@ -414,6 +415,75 @@ router.post('/:orgId/onboarding/complete', requireAuth, async (req: Request, res
   } catch (err) {
     logger.error(err, 'complete_onboarding_error');
     return res.status(500).json({ error: 'Failed to complete onboarding' });
+  }
+});
+
+// ── ORG SCHOLARSHIPS ──────────────────────────────────────────────────────────
+
+// GET /org/:orgId/scholarships
+router.get('/:orgId/scholarships', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+    const scholarships = await scholarshipsService.listOrgScholarships(req.params.orgId as string);
+    return res.json({ data: scholarships });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    next(err);
+  }
+});
+
+// POST /org/:orgId/scholarships
+router.post('/:orgId/scholarships', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const role = await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+    if (!['owner', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Admin or owner required to post scholarships' });
+    }
+    // Get org name for provider field
+    const { data: org } = await supabaseAdmin
+      .from('organizations').select('name').eq('id', req.params.orgId).maybeSingle();
+
+    const schema = z.object({
+      title:        z.string().min(3).max(200),
+      amount_label: z.string().max(100).optional(),
+      deadline:     z.string().optional(),
+      is_rolling:   z.boolean().optional().default(false),
+      url:          z.string().url(),
+      description:  z.string().max(2000).optional(),
+      requirements: z.string().max(2000).optional(),
+      eligibility:  z.string().max(1000).optional(),
+      categories:   z.array(z.string()).min(1),
+      renewable:    z.boolean().optional().default(false),
+    });
+
+    const body = schema.parse(req.body);
+    const scholarship = await scholarshipsService.createOrgScholarship(
+      req.params.orgId as string,
+      (org as any)?.name ?? 'Organization',
+      body,
+    );
+    return res.status(201).json({ data: scholarship });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    next(err);
+  }
+});
+
+// DELETE /org/:orgId/scholarships/:scholarshipId
+router.delete('/:orgId/scholarships/:scholarshipId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const role = await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+    if (!['owner', 'admin'].includes(role)) {
+      return res.status(403).json({ error: 'Admin or owner required' });
+    }
+    await scholarshipsService.deleteOrgScholarship(
+      req.params.orgId as string,
+      req.params.scholarshipId as string,
+    );
+    return res.json({ data: { deleted: true } });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    next(err);
   }
 });
 
