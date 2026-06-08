@@ -2,10 +2,26 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import * as scholarshipsService from '../services/scholarships.service';
+import { syncScholarshipFeeds } from '../services/scholarships-sync.service';
 import { success } from '../utils/shape';
 import { logger } from '../lib/logger';
 
 const router = Router();
+
+// ── POST /scholarships/sync — manual RSS sync trigger (admin only) ────────────
+// Protected by a static sync secret so it can be called from Railway cron or
+// a webhook without exposing it to regular users.
+router.post('/scholarships/sync', async (req: Request, res: Response) => {
+  const secret = req.headers['x-sync-secret'] as string | undefined;
+  if (secret !== process.env.SYNC_SECRET && process.env.SYNC_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  // Run in background — respond immediately
+  syncScholarshipFeeds()
+    .then((r) => logger.info(r, 'manual_scholarship_sync_done'))
+    .catch((e) => logger.warn({ err: e }, 'manual_scholarship_sync_error'));
+  return res.json(success({ message: 'Sync started in background' }));
+});
 
 // ── GET /scholarships — list / search all ──────────────────────────────────────
 router.get('/scholarships', requireAuth, async (req: Request, res: Response, next: NextFunction) => {

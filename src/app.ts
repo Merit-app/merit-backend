@@ -95,6 +95,22 @@ app.use('/org', orgBillingRouter);
 // 404 & error handling
 app.use(notFound);
 
+// ─── Scholarship RSS sync — runs every Sunday at 3:00 AM UTC ─────────────────
+// Non-blocking: any feed failure is logged as a warning, never crashes the app.
+import cron from 'node-cron';
+import { syncScholarshipFeeds } from './services/scholarships-sync.service';
+
+cron.schedule('0 3 * * 0', async () => {
+  const { logger } = await import('./lib/logger');
+  logger.info('scholarship_rss_cron_start');
+  try {
+    const result = await syncScholarshipFeeds();
+    logger.info(result, 'scholarship_rss_cron_done');
+  } catch (err) {
+    logger.warn({ err }, 'scholarship_rss_cron_error');
+  }
+}, { timezone: 'UTC' });
+
 const sentryError = getSentryErrorHandler();
 if (sentryError) app.use(sentryError);
 
