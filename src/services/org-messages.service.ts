@@ -18,13 +18,23 @@ export async function sendBulkMessage(params: {
   let userIds: string[] = [];
 
   if (filter === 'all') {
-    const { data } = await supabaseAdmin
-      .from('sessions')
-      .select('user_id')
-      .eq('org_id', orgId)
-      .eq('status', 'verified')
-      .is('deleted_at', null);
-    userIds = [...new Set<string>(toStringArray(data))];
+    // Include everyone who has ever logged a session here (any status) OR
+    // registered interest — not just verified sessions.
+    const [{ data: sessionRows }, { data: interestRows }] = await Promise.all([
+      supabaseAdmin
+        .from('sessions')
+        .select('user_id')
+        .eq('org_id', orgId)
+        .is('deleted_at', null),
+      supabaseAdmin
+        .from('org_volunteer_interests')
+        .select('user_id')
+        .eq('org_id', orgId),
+    ]);
+    userIds = [...new Set<string>([
+      ...toStringArray(sessionRows),
+      ...toStringArray(interestRows),
+    ])];
   } else if (filter === 'event' && eventId) {
     const { data } = await supabaseAdmin
       .from('event_signups')
@@ -58,11 +68,12 @@ export async function sendBulkMessage(params: {
     return { sent: 0, failed: 0 };
   }
 
+  // Fetch all matched users — include those without phone so we can
+  // count them in the "sent" response even if SMS isn't possible.
   const { data: users } = await supabaseAdmin
     .from('users')
     .select('id, phone')
-    .in('id', userIds)
-    .not('phone', 'is', null);
+    .in('id', userIds);
 
   let sent = 0;
   let failed = 0;
