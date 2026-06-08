@@ -402,3 +402,74 @@ export async function getSessionForVerification(sessionId: string) {
     },
   };
 }
+
+// ─── Org-level public verification ──────────────────────────────────────────
+// Aggregates ALL of a student's logged hours at a single organization. Powers
+// the QR code on the exported PDF's per-org verification block. No auth — only
+// non-sensitive fields are returned (no email/phone/user_id beyond the path).
+export async function getOrgVerificationForUser(userId: string, orgId: string) {
+  const { data: rows, error } = await supabaseAdmin
+    .from('sessions')
+    .select(`
+      id,
+      date,
+      hours,
+      activity,
+      status,
+      verified_at,
+      supervisor_name,
+      users!sessions_user_id_fkey ( name, school, grade ),
+      organizations!sessions_org_id_fkey ( name, city, category )
+    `)
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .order('date', { ascending: false });
+
+  if (error || !rows || rows.length === 0) return null;
+
+  const list = rows as any[];
+  const first = list[0];
+
+  const verified = list.filter((r) => r.status === 'verified');
+  const pending = list.filter((r) => r.status === 'pending');
+  const disputed = list.filter((r) => r.status === 'disputed');
+
+  const round1 = (n: number) => Math.round(n * 10) / 10;
+  const verifiedHours = round1(verified.reduce((sum, r) => sum + Number(r.hours ?? 0), 0));
+  const totalHours = round1(list.reduce((sum, r) => sum + Number(r.hours ?? 0), 0));
+
+  const dates = list.map((r) => r.date).filter(Boolean).sort();
+
+  return {
+    student: {
+      name: first.users?.name ?? null,
+      school: first.users?.school ?? null,
+      grade: first.users?.grade ?? null,
+    },
+    organization: {
+      name: first.organizations?.name ?? null,
+      city: first.organizations?.city ?? null,
+      category: first.organizations?.category ?? null,
+    },
+    summary: {
+      verifiedHours,
+      totalHours,
+      totalSessions: list.length,
+      verifiedSessions: verified.length,
+      pendingSessions: pending.length,
+      disputedSessions: disputed.length,
+      firstDate: dates[0] ?? null,
+      lastDate: dates[dates.length - 1] ?? null,
+    },
+    sessions: list.map((r) => ({
+      id: r.id,
+      date: r.date,
+      hours: Number(r.hours ?? 0),
+      activity: r.activity ?? null,
+      status: r.status,
+      verifiedAt: r.verified_at ?? null,
+      supervisorName: r.supervisor_name ?? null,
+    })),
+  };
+}

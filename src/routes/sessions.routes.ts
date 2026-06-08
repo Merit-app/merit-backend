@@ -29,6 +29,26 @@ router.get('/sessions/verify/:sessionId', validateUuidParam('sessionId'), async 
   }
 });
 
+// GET /sessions/verify/org/:userId/:orgId — public org-level verification.
+// Aggregates all of a student's hours at one org (powers the PDF QR code).
+router.get(
+  '/sessions/verify/org/:userId/:orgId',
+  validateUuidParam('userId', 'orgId'),
+  async (req: Request, res: Response) => {
+    try {
+      const data = await sessionsService.getOrgVerificationForUser(
+        req.params.userId as string,
+        req.params.orgId as string,
+      );
+      if (!data) return res.status(404).json({ error: 'No records found' });
+      return res.json({ data });
+    } catch (err) {
+      logger.error(err, 'verify_org_error');
+      return res.status(500).json({ error: 'Failed to fetch records' });
+    }
+  },
+);
+
 // Apply auth middleware to all other /sessions routes
 router.use('/sessions', requireAuth);
 
