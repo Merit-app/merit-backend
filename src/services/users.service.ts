@@ -31,6 +31,7 @@ export async function updateUser(userId: string, input: UpdateUserInput) {
   if (input.name !== undefined) updates.name = input.name ? sanitizeText(input.name) : input.name;
   if (input.school !== undefined) updates.school = input.school ? sanitizeText(input.school) : input.school;
   if (input.grade !== undefined) updates.grade = input.grade;
+  if ((input as any).city !== undefined) updates.city = (input as any).city ? sanitizeText((input as any).city) : (input as any).city;
   if (input.graduationYear !== undefined) updates.graduation_year = input.graduationYear;
   if (input.goalProgram !== undefined) {
     // Map frontend display values → DB-stored values (keep constraint-safe)

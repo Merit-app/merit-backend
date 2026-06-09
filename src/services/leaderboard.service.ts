@@ -73,6 +73,7 @@ export async function getLeaderboard(params: {
     .from('sessions')
     .select('user_id, org_id, hours')
     .eq('status', 'verified')
+    .eq('self_reported', false)  // exclude self-tracked — only org-verified counts
     .is('deleted_at', null);
 
   if (dateFilter) {
@@ -131,10 +132,10 @@ export async function getLeaderboard(params: {
     return { entries: [], currentUserEntry: null, currentUserRank: null, totalParticipants: 0, period, type };
   }
 
-  // 3. Fetch user details in batch
+  // 3. Fetch user details in batch — include city for local leaderboard
   const { data: users } = await supabaseAdmin
     .from('users')
-    .select('id, name, username, avatar_url, school, profile_public')
+    .select('id, name, username, avatar_url, school, city, profile_public')
     .in('id', userIds)
     .is('deleted_at', null);
 
@@ -143,24 +144,10 @@ export async function getLeaderboard(params: {
     userDetailMap.set((u as any).id as string, u);
   }
 
-  // 4. For local filter, fetch org cities in batch
-  const orgCityMap = new Map<string, string>();
-  if (type === 'local') {
-    const allOrgIds = [
-      ...new Set(
-        Array.from(userAggMap.values()).flatMap(v => [...v.orgIds]),
-      ),
-    ];
-    if (allOrgIds.length > 0) {
-      const { data: orgs } = await supabaseAdmin
-        .from('organizations')
-        .select('id, city')
-        .in('id', allOrgIds);
-      for (const org of orgs ?? []) {
-        if ((org as any).city) orgCityMap.set((org as any).id as string, (org as any).city as string);
-      }
-    }
-  }
+  // 4. For local filter, use the city stored on the user profile directly.
+  // This is set by the student in Settings → Profile and is the most reliable
+  // signal — no need to infer from org cities.
+  const orgCityMap = new Map<string, string>(); // kept for type-compat, unused now
 
   // 5. Apply type-specific filters and build candidate list
   interface Candidate {
@@ -186,12 +173,10 @@ export async function getLeaderboard(params: {
     let primaryCity: string | null = null;
 
     if (type === 'local' && city) {
-      const userCities = [...agg.orgIds]
-        .map(orgId => orgCityMap.get(orgId))
-        .filter(Boolean) as string[];
-      const matchesCity = userCities.some(c => c.toLowerCase() === city.toLowerCase());
-      if (!matchesCity) continue;
-      primaryCity = city;
+      // Use the city the student set on their own profile
+      const userCity = (ud.city as string | null) ?? '';
+      if (!userCity || userCity.toLowerCase() !== city.toLowerCase()) continue;
+      primaryCity = userCity;
     }
 
     candidates.push({ ...agg, userDetail: ud, primaryCity });
@@ -324,6 +309,7 @@ export async function getUserLeaderboardStats(username: string): Promise<{
     .select('hours, date, org_id, organizations(name)')
     .eq('user_id', userId)
     .eq('status', 'verified')
+    .eq('self_reported', false)
     .is('deleted_at', null);
 
   const verifiedHours = (sessions ?? []).reduce(
