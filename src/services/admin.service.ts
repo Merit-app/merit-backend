@@ -78,11 +78,13 @@ export async function updateChapter(
     logoUrl?: string;
     primaryColor?: string;
     verifiedEmailDomain?: string;
+    requiredHours?: number;
   },
 ) {
   const chapterId = await getCoordinatorChapterId(userId);
 
   const patch: Record<string, any> = {};
+  if (updates.requiredHours !== undefined) patch.required_hours = Math.max(0, Math.trunc(updates.requiredHours));
   if (updates.name !== undefined) patch.name = updates.name;
   if (updates.contactEmail !== undefined) patch.contact_email = updates.contactEmail;
   if (updates.contactPhone !== undefined) patch.contact_phone = updates.contactPhone;
@@ -325,6 +327,130 @@ export async function createInvite(userId: string, email: string) {
   return data;
 }
 
+// ─── Roster bulk import ─────────────────────────────────────────────────────
+
+export interface RosterRow {
+  name: string;
+  email: string;
+  graduationYear?: number | null;
+}
+
+export interface RosterImportResult {
+  created: number;
+  skippedExisting: number;
+  errors: { email: string; reason: string }[];
+  invites: { email: string; name: string; inviteToken: string }[];
+}
+
+/**
+ * Bulk-provision a chapter roster from parsed CSV rows. For each row we create a
+ * chapter_invite (pre-filled with name + grad year) unless the email is already a
+ * chapter member or already has a pending invite. Enforces the chapter member
+ * limit across the whole batch. Returns a per-row summary so the coordinator can
+ * see exactly what happened.
+ */
+export async function importRoster(userId: string, rows: RosterRow[]): Promise<RosterImportResult> {
+  const chapterId = await getCoordinatorChapterId(userId);
+
+  const result: RosterImportResult = { created: 0, skippedExisting: 0, errors: [], invites: [] };
+
+  // Normalise + de-dupe within the uploaded file itself (last one wins on name).
+  const byEmail = new Map<string, RosterRow>();
+  for (const r of rows) {
+    const email = (r.email ?? '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      result.errors.push({ email: r.email ?? '(blank)', reason: 'Invalid email address' });
+      continue;
+    }
+    byEmail.set(email, { ...r, email });
+  }
+
+  const emails = Array.from(byEmail.keys());
+  if (emails.length === 0) return result;
+
+  // Capacity check: current members + this batch must fit under max_members.
+  const { data: chapter } = await supabaseAdmin
+    .from('chapters')
+    .select('max_members')
+    .eq('id', chapterId)
+    .maybeSingle();
+  const maxMembers = (chapter as any)?.max_members ?? 100;
+
+  const { count: memberCount } = await supabaseAdmin
+    .from('users')
+    .select('*', { count: 'exact', head: true })
+    .eq('chapter_id', chapterId);
+
+  // Existing members (already joined) — skip these.
+  const { data: existingUsers } = await supabaseAdmin
+    .from('users')
+    .select('email')
+    .eq('chapter_id', chapterId)
+    .in('email', emails);
+  const existingMemberEmails = new Set(
+    ((existingUsers as any[] | null) ?? []).map((u) => (u.email as string).toLowerCase()),
+  );
+
+  // Existing pending invites — skip these too.
+  const { data: pendingInvites } = await supabaseAdmin
+    .from('chapter_invites')
+    .select('email_lower')
+    .eq('chapter_id', chapterId)
+    .is('accepted_at', null)
+    .gte('expires_at', new Date().toISOString());
+  const pendingInviteEmails = new Set(
+    ((pendingInvites as any[] | null) ?? []).map((i) => (i.email_lower as string)),
+  );
+
+  let remainingCapacity = Math.max(0, maxMembers - (memberCount ?? 0));
+  const toInsert: any[] = [];
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30-day roster invites
+
+  for (const [email, row] of byEmail.entries()) {
+    if (existingMemberEmails.has(email) || pendingInviteEmails.has(email)) {
+      result.skippedExisting++;
+      continue;
+    }
+    if (remainingCapacity <= 0) {
+      result.errors.push({ email, reason: `Chapter member limit (${maxMembers}) reached` });
+      continue;
+    }
+    const token = generateUrlSafeToken(32);
+    const name = (row.name ?? '').trim().slice(0, 120) || email.split('@')[0];
+    const gradYear =
+      row.graduationYear != null && Number.isFinite(Number(row.graduationYear))
+        ? Math.trunc(Number(row.graduationYear))
+        : null;
+
+    toInsert.push({
+      chapter_id: chapterId,
+      email,
+      name,
+      graduation_year: gradYear,
+      invited_by: userId,
+      invite_token: token,
+      expires_at: expiresAt,
+    });
+    result.invites.push({ email, name, inviteToken: token });
+    remainingCapacity--;
+  }
+
+  if (toInsert.length > 0) {
+    const { error } = await supabaseAdmin.from('chapter_invites').insert(toInsert);
+    if (error) {
+      logger.error({ error, chapterId, count: toInsert.length }, 'roster_import_insert_failed');
+      throw new AppError('roster_import_failed', 'Failed to save roster invites.', 500);
+    }
+    result.created = toInsert.length;
+  }
+
+  logger.info(
+    { userId, chapterId, created: result.created, skipped: result.skippedExisting, errors: result.errors.length },
+    'roster_imported',
+  );
+  return result;
+}
+
 export async function revokeInvite(userId: string, inviteId: string) {
   const chapterId = await getCoordinatorChapterId(userId);
 
@@ -353,11 +479,20 @@ export async function acceptInvite(token: string, userId: string) {
   if (i.accepted_at) throw new AppError('already_accepted', 'This invite has already been used.', 409);
   if (new Date(i.expires_at) < new Date()) throw new AppError('expired', 'This invite has expired.', 400);
 
-  // Join the chapter
-  await supabaseAdmin
-    .from('users')
-    .update({ chapter_id: i.chapter_id })
-    .eq('id', userId);
+  // Join the chapter, carrying over any roster-provided details that the
+  // student hasn't already set on their own profile.
+  const joinPatch: Record<string, any> = { chapter_id: i.chapter_id };
+  if (i.graduation_year != null) {
+    const { data: existingUser } = await supabaseAdmin
+      .from('users')
+      .select('graduation_year')
+      .eq('id', userId)
+      .maybeSingle();
+    if (existingUser && (existingUser as any).graduation_year == null) {
+      joinPatch.graduation_year = i.graduation_year;
+    }
+  }
+  await supabaseAdmin.from('users').update(joinPatch).eq('id', userId);
 
   await supabaseAdmin
     .from('chapter_invites')
@@ -444,4 +579,160 @@ function buildPeriod(opts: { from?: string; to?: string }): string {
   if (opts.from) return `From ${opts.from}`;
   if (opts.to) return `Through ${opts.to}`;
   return 'All time';
+}
+
+// ─── Cohort compliance ──────────────────────────────────────────────────────
+
+export interface ComplianceStudent {
+  id: string;
+  name: string;
+  email: string;
+  graduationYear: number | null;
+  verifiedHours: number;
+  requiredHours: number;
+  met: boolean;
+  remaining: number;
+}
+
+export interface ComplianceReport {
+  chapterName: string;
+  requiredHours: number;
+  totalStudents: number;
+  metCount: number;
+  notMetCount: number;
+  byGradYear: { graduationYear: number | null; total: number; met: number }[];
+  students: ComplianceStudent[];
+}
+
+/**
+ * Compliance view for a coordinator: for every chapter member, how many VERIFIED
+ * hours they have vs the chapter's required_hours, who has met the requirement,
+ * and a breakdown by graduation year. Only org-verified hours count toward the
+ * requirement (self-reported hours are excluded).
+ */
+export async function getCompliance(userId: string): Promise<ComplianceReport> {
+  const chapterId = await getCoordinatorChapterId(userId);
+
+  const { data: chapter } = await supabaseAdmin
+    .from('chapters')
+    .select('name, required_hours')
+    .eq('id', chapterId)
+    .maybeSingle();
+
+  const requiredHours = Number((chapter as any)?.required_hours ?? 0);
+
+  const { data: members } = await supabaseAdmin
+    .from('users')
+    .select('id, name, email, graduation_year')
+    .eq('chapter_id', chapterId)
+    .is('deleted_at', null)
+    .order('name');
+
+  const memberList = (members as any[] | null) ?? [];
+  const memberIds = memberList.map((m) => m.id as string);
+
+  // Sum verified, non-self-reported hours per student.
+  const hoursByUser = new Map<string, number>();
+  if (memberIds.length > 0) {
+    const { data: sessions } = await supabaseAdmin
+      .from('sessions')
+      .select('user_id, hours')
+      .in('user_id', memberIds)
+      .eq('status', 'verified')
+      .eq('self_reported', false)
+      .is('deleted_at', null);
+
+    for (const s of (sessions as any[] | null) ?? []) {
+      hoursByUser.set(s.user_id, (hoursByUser.get(s.user_id) ?? 0) + Number(s.hours ?? 0));
+    }
+  }
+
+  const students: ComplianceStudent[] = memberList.map((m) => {
+    const verifiedHours = hoursByUser.get(m.id) ?? 0;
+    const met = requiredHours > 0 ? verifiedHours >= requiredHours : false;
+    return {
+      id: m.id,
+      name: m.name ?? 'Student',
+      email: m.email ?? '',
+      graduationYear: m.graduation_year ?? null,
+      verifiedHours,
+      requiredHours,
+      met,
+      remaining: Math.max(0, requiredHours - verifiedHours),
+    };
+  });
+
+  // Sort: not-met first (most behind first), then met.
+  students.sort((a, b) => {
+    if (a.met !== b.met) return a.met ? 1 : -1;
+    return b.remaining - a.remaining;
+  });
+
+  const gradMap = new Map<number | null, { total: number; met: number }>();
+  for (const s of students) {
+    const key = s.graduationYear;
+    const g = gradMap.get(key) ?? { total: 0, met: 0 };
+    g.total++;
+    if (s.met) g.met++;
+    gradMap.set(key, g);
+  }
+  const byGradYear = Array.from(gradMap.entries())
+    .map(([graduationYear, v]) => ({ graduationYear, total: v.total, met: v.met }))
+    .sort((a, b) => (a.graduationYear ?? 9999) - (b.graduationYear ?? 9999));
+
+  const metCount = students.filter((s) => s.met).length;
+
+  return {
+    chapterName: (chapter as any)?.name ?? '',
+    requiredHours,
+    totalStudents: students.length,
+    metCount,
+    notMetCount: students.length - metCount,
+    byGradYear,
+    students,
+  };
+}
+
+// ─── CSV helpers ────────────────────────────────────────────────────────────
+
+/** Escape a single CSV field per RFC 4180 (quote if it contains comma/quote/newline). */
+function csvField(value: unknown): string {
+  const s = value == null ? '' : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function toCsv(headers: string[], rows: (unknown[])[]): string {
+  const lines = [headers.map(csvField).join(',')];
+  for (const row of rows) lines.push(row.map(csvField).join(','));
+  return lines.join('\r\n');
+}
+
+/** Cohort compliance as CSV — one row per student, for transcripts/scholarships. */
+export async function getComplianceCsv(userId: string): Promise<string> {
+  const report = await getCompliance(userId);
+  return toCsv(
+    ['Name', 'Email', 'Graduation Year', 'Verified Hours', 'Required Hours', 'Met Requirement', 'Hours Remaining'],
+    report.students.map((s) => [
+      s.name,
+      s.email,
+      s.graduationYear ?? '',
+      s.verifiedHours,
+      s.requiredHours,
+      s.met ? 'Yes' : 'No',
+      s.remaining,
+    ]),
+  );
+}
+
+/** Detailed session-level grant report as CSV. */
+export async function getGrantReportCsv(
+  userId: string,
+  opts: { from?: string; to?: string } = {},
+): Promise<string> {
+  const report = await getGrantReport(userId, opts);
+  return toCsv(
+    ['Student', 'Organization', 'Date', 'Hours', 'Status', 'Verification Tier'],
+    report.sessions.map((s: any) => [s.studentName, s.orgName, s.date, s.hours, s.status, s.tier ?? '']),
+  );
 }

@@ -34,6 +34,7 @@ const updateChapterSchema = z.object({
   logoUrl: z.string().url().optional(),
   primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   verifiedEmailDomain: z.string().optional(),
+  requiredHours: z.number().int().min(0).max(10000).optional(),
 });
 
 router.patch(
@@ -212,6 +213,59 @@ router.post(
   },
 );
 
+// ─── Roster bulk import ─────────────────────────────────────────────────────
+
+const rosterImportSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(120),
+        email: z.string().email(),
+        graduationYear: z.number().int().min(1900).max(2100).nullish(),
+      }),
+    )
+    .min(1)
+    .max(1000), // cap batch size — anything larger should be paginated client-side
+});
+
+// POST /admin/roster/import
+router.post(
+  '/admin/roster/import',
+  validate(rosterImportSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.importRoster(req.user!.id, req.body.rows);
+      res.status(201).json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ─── Cohort compliance ──────────────────────────────────────────────────────
+
+// GET /admin/compliance
+router.get('/admin/compliance', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = await adminService.getCompliance(req.user!.id);
+    res.json(success(data));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /admin/compliance/export — CSV download of the cohort compliance report
+router.get('/admin/compliance/export', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const csv = await adminService.getComplianceCsv(req.user!.id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="compliance.csv"');
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ─── Grant report ─────────────────────────────────────────────────────────
 
 // GET /admin/reports/grant?from=2024-01-01&to=2024-12-31
@@ -221,8 +275,16 @@ router.get('/admin/reports/grant', async (req: Request, res: Response, next: Nex
       .object({
         from: z.string().date().optional(),
         to: z.string().date().optional(),
+        format: z.enum(['json', 'csv']).optional(),
       })
       .parse(req.query);
+
+    if (query.format === 'csv') {
+      const csv = await adminService.getGrantReportCsv(req.user!.id, query);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="grant-report.csv"');
+      return res.send(csv);
+    }
 
     const data = await adminService.getGrantReport(req.user!.id, query);
     res.json(success(data));
