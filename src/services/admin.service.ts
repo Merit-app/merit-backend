@@ -3,6 +3,7 @@ import { AppError, NotFoundError, ForbiddenError } from '../lib/errors';
 import { generateUrlSafeToken } from '../lib/crypto';
 import { normalizePhone } from '../lib/phone';
 import { logger } from '../lib/logger';
+import { sendRosterInviteEmails } from './school-onboarding.service';
 
 // ─── Authorization helpers ────────────────────────────────────────────────
 
@@ -442,6 +443,14 @@ export async function importRoster(userId: string, rows: RosterRow[]): Promise<R
       throw new AppError('roster_import_failed', 'Failed to save roster invites.', 500);
     }
     result.created = toInsert.length;
+
+    // Email each newly-invited student a join link (best-effort, non-blocking).
+    const { data: chapterRow } = await supabaseAdmin
+      .from('chapters')
+      .select('name')
+      .eq('id', chapterId)
+      .maybeSingle();
+    void sendRosterInviteEmails((chapterRow as any)?.name ?? 'your chapter', result.invites);
   }
 
   logger.info(

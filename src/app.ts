@@ -70,6 +70,7 @@ import leaderboardRouter from './routes/leaderboard.routes';
 import orgRouter from './routes/org.routes';
 import scholarshipsRouter from './routes/scholarships.routes';
 import orgBillingRouter from './routes/org-billing.routes';
+import schoolOnboardingRouter from './routes/school-onboarding.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -91,6 +92,7 @@ app.use('/', leaderboardRouter);
 app.use('/org', orgRouter);
 app.use('/', scholarshipsRouter);
 app.use('/org', orgBillingRouter);
+app.use('/', schoolOnboardingRouter);
 
 // 404 & error handling
 app.use(notFound);
