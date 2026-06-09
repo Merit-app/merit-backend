@@ -5,6 +5,7 @@ import * as scholarshipsService from '../services/scholarships.service';
 import { syncScholarshipFeeds } from '../services/scholarships-sync.service';
 import { success } from '../utils/shape';
 import { logger } from '../lib/logger';
+import { safeSecretEqual } from '../lib/crypto';
 
 const router = Router();
 
@@ -12,8 +13,9 @@ const router = Router();
 // Protected by a static sync secret so it can be called from Railway cron or
 // a webhook without exposing it to regular users.
 router.post('/scholarships/sync', async (req: Request, res: Response) => {
-  const secret = req.headers['x-sync-secret'] as string | undefined;
-  if (secret !== process.env.SYNC_SECRET && process.env.SYNC_SECRET) {
+  // Fail closed: if SYNC_SECRET is not configured, the endpoint is disabled
+  // entirely rather than left open to anonymous callers.
+  if (!process.env.SYNC_SECRET || !safeSecretEqual(req.headers['x-sync-secret'], process.env.SYNC_SECRET)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   // Run in background — respond immediately
@@ -26,19 +28,28 @@ router.post('/scholarships/sync', async (req: Request, res: Response) => {
 // ── GET /scholarships — list / search all ──────────────────────────────────────
 router.get('/scholarships', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { search, category, location, limit, offset } = req.query;
+    // Coerce to a single string (ignore array/object query injection) and clamp numerics.
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' && v.length ? v.slice(0, 200) : undefined;
+    const clampNum = (v: unknown, def: number, min: number, max: number): number => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return def;
+      return Math.min(Math.max(Math.trunc(n), min), max);
+    };
+
+    const search = str(req.query.search);
 
     const scholarships = await scholarshipsService.listScholarships({
-      search:   search   as string | undefined,
-      category: category as string | undefined,
-      location: location as string | undefined,
-      limit:    limit  ? Number(limit)  : 30,
-      offset:   offset ? Number(offset) : 0,
+      search,
+      category: str(req.query.category),
+      location: str(req.query.location),
+      limit:    clampNum(req.query.limit, 30, 1, 100),
+      offset:   clampNum(req.query.offset, 0, 0, 100000),
     });
 
     // Kick off RapidAPI background refresh — non-blocking, fails silently
     scholarshipsService
-      .fetchAndCacheFromRapidAPI(search as string | undefined)
+      .fetchAndCacheFromRapidAPI(search)
       .catch(() => { /* swallowed — background task */ });
 
     // Also return saved IDs so the client can highlight bookmarked cards

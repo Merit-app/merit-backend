@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.middleware';
 import { updateUserSchema } from '../schemas/users.schema';
 import * as usersService from '../services/users.service';
 import { success } from '../utils/shape';
+import { safeSecretEqual } from '../lib/crypto';
 
 const router = Router();
 
@@ -90,8 +91,7 @@ router.get('/users/me/export', async (req: Request, res: Response, next: NextFun
 // Called by a scheduled cron job to hard-delete accounts past their 30-day grace period.
 router.post('/users/internal/purge-expired', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const secret = process.env.PURGE_SECRET;
-    if (!secret || req.headers['x-purge-secret'] !== secret) {
+    if (!process.env.PURGE_SECRET || !safeSecretEqual(req.headers['x-purge-secret'], process.env.PURGE_SECRET)) {
       return res.status(403).json({ error: 'Forbidden' });
     }
     const result = await usersService.purgeExpiredAccounts();

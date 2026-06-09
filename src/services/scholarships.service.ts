@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
+import { sanitizePostgrestSearch } from '../lib/crypto';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,9 +47,12 @@ export async function listScholarships(params: {
     .range(offset, offset + limit - 1);
 
   if (search) {
-    query = query.or(
-      `title.ilike.%${search}%,provider.ilike.%${search}%,description.ilike.%${search}%`,
-    );
+    const safe = sanitizePostgrestSearch(search);
+    if (safe) {
+      query = query.or(
+        `title.ilike.%${safe}%,provider.ilike.%${safe}%,description.ilike.%${safe}%`,
+      );
+    }
   }
   if (category && category !== 'all') {
     query = query.contains('categories', [category]);

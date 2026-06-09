@@ -485,7 +485,7 @@ export async function uploadOrgImage(params: {
 
   if (uploadError) {
     logger.error({ orgId, uploadError }, 'org_image_upload_failed');
-    throw new Error(`Failed to upload image: ${uploadError.message}`);
+    throw new Error('Failed to upload image. Please try again.');
   }
 
   // Cache-bust so the new image shows immediately

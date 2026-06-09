@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '../config/supabase';
+import { sanitizePostgrestSearch } from '../lib/crypto';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -160,7 +161,8 @@ export async function discoverOrgs(userId: string, opts: {
     const prefixes = CATEGORY_NTEE[opts.category];
     if (prefixes && prefixes.length) {
       const ors = prefixes.map((p) => `category.ilike.${p}%`);
-      ors.push(`category.ilike.%${opts.category}%`); // internal orgs with the literal label
+      const safeLabel = sanitizePostgrestSearch(opts.category);
+      if (safeLabel) ors.push(`category.ilike.%${safeLabel}%`); // internal orgs with the literal label
       query = (query as any).or(ors.join(','));
     } else {
       query = (query as any).ilike('category', `%${opts.category}%`);

@@ -4,16 +4,14 @@ import { TWILIO_MODE } from '../config/twilio';
 import { RESEND_MODE } from '../config/resend';
 import { STRIPE_MODE } from '../config/stripe';
 import { redis } from '../config/redis';
+import { safeSecretEqual } from '../lib/crypto';
 
 const router = Router();
 
 router.get('/health', (req, res) => {
   // Detailed diagnostics are only exposed when the caller presents the correct token.
   // Public response reveals only liveness status — no version, mode, or infra info.
-  const requestToken = req.headers['x-health-token'];
-  const expectedToken = process.env.HEALTH_SECRET_TOKEN;
-
-  if (expectedToken && requestToken === expectedToken) {
+  if (safeSecretEqual(req.headers['x-health-token'], process.env.HEALTH_SECRET_TOKEN)) {
     return res.json({
       status: 'ok',
       uptime: process.uptime(),
