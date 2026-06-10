@@ -3,6 +3,7 @@ import { AppError, NotFoundError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { getCoordinatorChapterId } from './admin.service';
 import { createManyNotifications } from './notifications.service';
+import { assertPermission } from './chapter-team.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -303,6 +304,7 @@ async function assertStudentInChapter(chapterId: string, studentId: string) {
 
 export async function setStudentOverride(userId: string, studentId: string, hours: number | null) {
   const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'edit_goals');
   await assertStudentInChapter(ctx.id, studentId);
   const value = hours == null ? null : Math.max(0, Math.trunc(hours));
   const { error } = await supabaseAdmin
@@ -315,6 +317,7 @@ export async function setStudentOverride(userId: string, studentId: string, hour
 
 export async function setCohortGoal(userId: string, graduationYear: number, requiredHours: number) {
   const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'edit_goals');
   const { error } = await supabaseAdmin
     .from('chapter_cohort_goals')
     .upsert(
@@ -353,6 +356,7 @@ export async function adjustHours(
   reason: string | undefined,
 ) {
   const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'approve_hours');
   await assertStudentInChapter(ctx.id, studentId);
   if (!Number.isFinite(hours) || hours === 0) {
     throw new AppError('invalid_hours', 'Adjustment hours must be a non-zero number.', 400);
@@ -373,6 +377,7 @@ export async function updateSettings(
   input: { requiredHours?: number; requirementDeadline?: string | null; riskWindowDays?: number; remindersEnabled?: boolean },
 ) {
   const chapterId = await getCoordinatorChapterId(userId);
+  await assertPermission(userId, chapterId, 'manage_settings');
   const patch: Record<string, any> = {};
   if (input.requiredHours !== undefined) patch.required_hours = Math.max(0, Math.trunc(input.requiredHours));
   if (input.requirementDeadline !== undefined) patch.requirement_deadline = input.requirementDeadline || null;
@@ -435,6 +440,7 @@ export async function sendAnnouncement(
   input: { title: string; body: string; audience: string },
 ): Promise<{ sent: number }> {
   const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'message_students');
   const students = audienceFilter(await membersWithStatus(ctx), input.audience);
   const ids = students.map((s) => s.id);
 
@@ -452,6 +458,7 @@ export async function sendAnnouncement(
 /** Manual "remind everyone who's behind" — coordinator-triggered. */
 export async function remindBehind(userId: string): Promise<{ sent: number }> {
   const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'message_students');
   const behind = (await membersWithStatus(ctx)).filter(
     (s) => s.status !== 'met' && s.status !== 'no_goal',
   );

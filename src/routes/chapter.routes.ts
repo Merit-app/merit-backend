@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import * as chapter from '../services/chapter.service';
+import * as team from '../services/chapter-team.service';
 import { success } from '../utils/shape';
 
 const router = Router();
@@ -109,6 +110,51 @@ router.post('/chapter/remind-behind', async (req: Request, res: Response, next: 
   try {
     res.json(success(await chapter.remindBehind(req.user!.id)));
   } catch (err) { next(err); }
+});
+
+// ── Team & roles ─────────────────────────────────────────────────────────────
+
+// GET /chapter/me/permissions — the caller's own permissions (for UI gating)
+router.get('/chapter/me/permissions', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.getMyPermissions(req.user!.id))); } catch (err) { next(err); }
+});
+
+// GET /chapter/team
+router.get('/chapter/team', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.getTeam(req.user!.id))); } catch (err) { next(err); }
+});
+
+const addCoordSchema = z.object({ email: z.string().email(), roleId: z.string().uuid().nullable().optional() });
+router.post('/chapter/team', validate(addCoordSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(success(await team.addCoordinator(req.user!.id, req.body.email, req.body.roleId ?? null))); } catch (err) { next(err); }
+});
+
+const setRoleSchema = z.object({ roleId: z.string().uuid().nullable() });
+router.patch('/chapter/team/:userId/role', validateUuidParam('userId'), validate(setRoleSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.setCoordinatorRole(req.user!.id, req.params.userId as string, req.body.roleId))); } catch (err) { next(err); }
+});
+
+router.delete('/chapter/team/:userId', validateUuidParam('userId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.removeCoordinator(req.user!.id, req.params.userId as string))); } catch (err) { next(err); }
+});
+
+// GET /chapter/roles
+router.get('/chapter/roles', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.listRoles(req.user!.id))); } catch (err) { next(err); }
+});
+
+const roleSchema = z.object({ name: z.string().min(1).max(60), permissions: z.array(z.string()).max(40) });
+router.post('/chapter/roles', validate(roleSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(success(await team.createRole(req.user!.id, req.body.name, req.body.permissions))); } catch (err) { next(err); }
+});
+
+const roleUpdateSchema = z.object({ name: z.string().min(1).max(60).optional(), permissions: z.array(z.string()).max(40).optional() });
+router.patch('/chapter/roles/:roleId', validateUuidParam('roleId'), validate(roleUpdateSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.updateRole(req.user!.id, req.params.roleId as string, req.body))); } catch (err) { next(err); }
+});
+
+router.delete('/chapter/roles/:roleId', validateUuidParam('roleId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await team.deleteRole(req.user!.id, req.params.roleId as string))); } catch (err) { next(err); }
 });
 
 export default router;
