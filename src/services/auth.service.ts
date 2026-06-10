@@ -281,12 +281,26 @@ export async function requestPasswordReset(email: string, ip?: string) {
 
   if (!user) return; // Silent — don't reveal existence
 
-  const resetUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password`;
+  const redirectTo = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password`;
 
-  // Supabase sends the reset email; we also send our branded one
-  await (supabaseAdmin.auth as any).resetPasswordForEmail?.(email, {
-    redirectTo: resetUrl,
-  });
+  // Generate a real recovery link (with a valid token) via the admin API, then
+  // deliver it through Resend — which is reliable — instead of relying on
+  // Supabase's built-in (rate-limited, often-undelivered) auth email sender.
+  let resetUrl = redirectTo;
+  try {
+    const { data: linkData, error: linkErr } = await (supabaseAdmin.auth as any).admin.generateLink({
+      type: 'recovery',
+      email,
+      options: { redirectTo },
+    });
+    if (linkErr) {
+      logger.error({ err: linkErr }, 'password_reset_generatelink_failed');
+    } else if (linkData?.properties?.action_link) {
+      resetUrl = linkData.properties.action_link as string;
+    }
+  } catch (err) {
+    logger.error({ err: (err as any)?.message }, 'password_reset_generatelink_threw');
+  }
 
   await sendPasswordResetEmail({
     name: user.name,
