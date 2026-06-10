@@ -4,6 +4,7 @@ import { logger } from '../lib/logger';
 import { getCoordinatorChapterId } from './admin.service';
 import { createManyNotifications } from './notifications.service';
 import { assertPermission } from './chapter-team.service';
+import { logChapterAction } from './chapter-audit.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -312,6 +313,7 @@ export async function setStudentOverride(userId: string, studentId: string, hour
     .update({ chapter_goal_override: value })
     .eq('id', studentId);
   if (error) throw new AppError('update_failed', 'Failed to set goal.', 500);
+  void logChapterAction(ctx.id, userId, 'set_student_goal', { targetUserId: studentId, detail: value == null ? 'cleared override' : `${value} hrs` });
   return { goalOverride: value };
 }
 
@@ -369,6 +371,7 @@ export async function adjustHours(
     created_by: userId,
   });
   if (error) throw new AppError('adjust_failed', 'Failed to record adjustment.', 500);
+  void logChapterAction(ctx.id, userId, 'adjust_hours', { targetUserId: studentId, detail: `${hours >= 0 ? '+' : ''}${hours} hrs${reason ? ` — ${reason}` : ''}` });
   return { ok: true };
 }
 
@@ -387,7 +390,24 @@ export async function updateSettings(
 
   const { error } = await supabaseAdmin.from('chapters').update(patch).eq('id', chapterId);
   if (error) throw new AppError('update_failed', 'Failed to update settings.', 500);
+  void logChapterAction(chapterId, userId, 'update_settings', { detail: Object.keys(patch).join(', ') });
   return { updated: true };
+}
+
+// ─── Student data control (consent + leave) ─────────────────────────────────
+
+export async function acknowledgeConsent(userId: string) {
+  await supabaseAdmin.from('users').update({ chapter_consent_at: new Date().toISOString() }).eq('id', userId);
+  return { acknowledged: true };
+}
+
+export async function leaveChapter(userId: string) {
+  // Student-initiated exit: detach from the chapter and clear chapter-scoped fields.
+  await supabaseAdmin
+    .from('users')
+    .update({ chapter_id: null, chapter_consent_at: null, chapter_goal_override: null })
+    .eq('id', userId);
+  return { left: true };
 }
 
 // ─── Member-status helper (shared by announcements + reminders) ──────────────
@@ -540,7 +560,7 @@ export async function runWeeklyChapterReminders(): Promise<{ chapters: number; s
 export async function getMyChapter(userId: string) {
   const { data: user } = await supabaseAdmin
     .from('users')
-    .select('id, chapter_id, graduation_year, chapter_goal_override')
+    .select('id, chapter_id, graduation_year, chapter_goal_override, chapter_consent_at, is_minor')
     .eq('id', userId)
     .maybeSingle();
 
@@ -587,5 +607,7 @@ export async function getMyChapter(userId: string) {
     status,
     deadline: ctx.deadline,
     daysToDeadline,
+    consentGiven: u.chapter_consent_at != null,
+    isMinor: !!u.is_minor,
   };
 }

@@ -6,6 +6,7 @@ import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import * as chapter from '../services/chapter.service';
 import * as team from '../services/chapter-team.service';
 import * as network from '../services/chapter-network.service';
+import * as audit from '../services/chapter-audit.service';
 import { success } from '../utils/shape';
 
 const router = Router();
@@ -92,6 +93,14 @@ router.get('/my-chapter', requireAuth, async (req: Request, res: Response, next:
   try {
     res.json(success(await chapter.getMyChapter(req.user!.id)));
   } catch (err) { next(err); }
+});
+
+// ── Student data control (consent + leave) ──────────────────────────────────
+router.post('/my-chapter/consent', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await chapter.acknowledgeConsent(req.user!.id))); } catch (err) { next(err); }
+});
+router.post('/my-chapter/leave', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await chapter.leaveChapter(req.user!.id))); } catch (err) { next(err); }
 });
 
 // ── Student-facing opportunities ─────────────────────────────────────────────
@@ -188,6 +197,11 @@ router.patch('/chapter/team/:userId/role', validateUuidParam('userId'), validate
 
 router.delete('/chapter/team/:userId', validateUuidParam('userId'), async (req: Request, res: Response, next: NextFunction) => {
   try { res.json(success(await team.removeCoordinator(req.user!.id, req.params.userId as string))); } catch (err) { next(err); }
+});
+
+// GET /chapter/audit — recent coordinator actions (manage_team)
+router.get('/chapter/audit', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await audit.getAuditLog(req.user!.id))); } catch (err) { next(err); }
 });
 
 // GET /chapter/roles

@@ -6,6 +6,7 @@ import { sendEmail } from './resend.service';
 import { logger } from '../lib/logger';
 import { getCoordinatorChapterId } from './admin.service';
 import { assertPermission } from './chapter-team.service';
+import { logChapterAction } from './chapter-audit.service';
 import { createManyNotifications } from './notifications.service';
 import DOMPurify from 'isomorphic-dompurify';
 
@@ -51,6 +52,7 @@ export async function createPartnerInvite(userId: string, input: { orgName: stri
     `,
   });
 
+  void logChapterAction(chapterId, userId, 'invite_partner', { detail: orgName });
   logger.info({ chapterId, partnerId: (data as any).id }, 'partner_invite_created');
   return { id: (data as any).id };
 }
@@ -164,6 +166,7 @@ export async function createOpportunity(
     actionUrl: '/my-chapter',
   });
 
+  void logChapterAction(chapterId, userId, 'post_opportunity', { detail: title });
   logger.info({ chapterId, opportunityId: (data as any).id, notified: ids.length }, 'opportunity_posted');
   return { id: (data as any).id, notified: ids.length };
 }
