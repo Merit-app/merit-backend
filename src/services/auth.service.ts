@@ -152,6 +152,34 @@ export async function signup(input: {
     throw new AppError('signup_failed', 'Failed to create user profile.', 500);
   }
 
+  // 5b. Auto-pair into a chapter if a coordinator pre-loaded this email on a roster.
+  // This makes school onboarding seamless: students just sign up normally and are
+  // silently attached to their school's chapter.
+  try {
+    const { data: invite } = await supabaseAdmin
+      .from('chapter_invites')
+      .select('id, chapter_id, graduation_year')
+      .eq('email_lower', input.email.toLowerCase())
+      .is('accepted_at', null)
+      .gte('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    if (invite) {
+      const patch: Record<string, any> = { chapter_id: (invite as any).chapter_id };
+      if ((invite as any).graduation_year != null && input.grade == null) {
+        patch.graduation_year = (invite as any).graduation_year;
+      }
+      await supabaseAdmin.from('users').update(patch).eq('id', authUserId);
+      await supabaseAdmin
+        .from('chapter_invites')
+        .update({ accepted_at: new Date().toISOString(), accepted_by: authUserId })
+        .eq('id', (invite as any).id);
+      logger.info({ userId: authUserId, chapterId: (invite as any).chapter_id }, 'student_auto_paired_to_chapter');
+    }
+  } catch (err) {
+    logger.warn({ err: (err as any)?.message }, 'chapter_auto_pair_failed'); // non-fatal
+  }
+
   // 6. Send emails
   const confirmationUrl = `${env.FRONTEND_URL ?? 'http://localhost:3000'}/auth/confirm`;
   await sendWelcomeEmail({ name: input.name, email: input.email, confirmationUrl });
