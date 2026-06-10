@@ -5,6 +5,7 @@ import { validate } from '../middleware/validate.middleware';
 import { validateUuidParam } from '../middleware/validate-uuid.middleware';
 import * as chapter from '../services/chapter.service';
 import * as team from '../services/chapter-team.service';
+import * as network from '../services/chapter-network.service';
 import { success } from '../utils/shape';
 
 const router = Router();
@@ -91,6 +92,57 @@ router.get('/my-chapter', requireAuth, async (req: Request, res: Response, next:
   try {
     res.json(success(await chapter.getMyChapter(req.user!.id)));
   } catch (err) { next(err); }
+});
+
+// ── Student-facing opportunities ─────────────────────────────────────────────
+router.get('/my-opportunities', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.listMyOpportunities(req.user!.id))); } catch (err) { next(err); }
+});
+router.post('/opportunities/:oppId/signup', requireAuth, validateUuidParam('oppId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.signupOpportunity(req.user!.id, req.params.oppId as string))); } catch (err) { next(err); }
+});
+router.delete('/opportunities/:oppId/signup', requireAuth, validateUuidParam('oppId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.cancelSignup(req.user!.id, req.params.oppId as string))); } catch (err) { next(err); }
+});
+
+// ── Partner accept (org admin) ───────────────────────────────────────────────
+router.get('/partners/:token', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.getPartnerInvite(req.params.token as string))); } catch (err) { next(err); }
+});
+const acceptPartnerSchema = z.object({ token: z.string().min(10), orgId: z.string().uuid() });
+router.post('/partners/accept', requireAuth, validate(acceptPartnerSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.acceptPartner(req.user!.id, req.body.token, req.body.orgId))); } catch (err) { next(err); }
+});
+
+// ── Partners ─────────────────────────────────────────────────────────────────
+const partnerSchema = z.object({ orgName: z.string().min(1).max(200), contactEmail: z.string().email() });
+router.post('/chapter/partners', validate(partnerSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(success(await network.createPartnerInvite(req.user!.id, req.body))); } catch (err) { next(err); }
+});
+router.get('/chapter/partners', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.listPartners(req.user!.id))); } catch (err) { next(err); }
+});
+router.delete('/chapter/partners/:partnerId', validateUuidParam('partnerId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.revokePartner(req.user!.id, req.params.partnerId as string))); } catch (err) { next(err); }
+});
+
+// ── Opportunities (coordinator) ──────────────────────────────────────────────
+const opportunitySchema = z.object({
+  title: z.string().min(1).max(140),
+  description: z.string().max(2000).optional(),
+  orgName: z.string().max(200).optional(),
+  slots: z.number().int().min(0).max(100000).nullish(),
+  startsAt: z.string().datetime().nullish(),
+  location: z.string().max(200).optional(),
+});
+router.post('/chapter/opportunities', validate(opportunitySchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(success(await network.createOpportunity(req.user!.id, req.body))); } catch (err) { next(err); }
+});
+router.get('/chapter/opportunities', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.listOpportunities(req.user!.id))); } catch (err) { next(err); }
+});
+router.get('/chapter/opportunities/:oppId/signups', validateUuidParam('oppId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await network.getOpportunitySignups(req.user!.id, req.params.oppId as string))); } catch (err) { next(err); }
 });
 
 // POST /chapter/announcements  { title, body, audience }
