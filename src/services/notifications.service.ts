@@ -96,3 +96,48 @@ export async function deleteAllRead(userId: string): Promise<void> {
     .eq('user_id', userId)
     .eq('read', true);
 }
+
+// ─── Creation helpers ───────────────────────────────────────────────────────
+
+export interface NewNotification {
+  userId: string;
+  type: string;
+  title: string;
+  body: string;
+  actionUrl?: string | null;
+}
+
+/** Create a single in-app notification (best-effort; never throws). */
+export async function createNotification(n: NewNotification): Promise<void> {
+  try {
+    await supabaseAdmin.from('notifications').insert({
+      user_id: n.userId,
+      type: n.type,
+      title: n.title,
+      body: n.body,
+      action_url: n.actionUrl ?? null,
+      read: false,
+    });
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Bulk-create notifications (one row per recipient). Returns count inserted. */
+export async function createManyNotifications(
+  recipientIds: string[],
+  payload: { type: string; title: string; body: string; actionUrl?: string | null },
+): Promise<number> {
+  if (recipientIds.length === 0) return 0;
+  const rows = recipientIds.map((userId) => ({
+    user_id: userId,
+    type: payload.type,
+    title: payload.title,
+    body: payload.body,
+    action_url: payload.actionUrl ?? null,
+    read: false,
+  }));
+  const { error } = await supabaseAdmin.from('notifications').insert(rows);
+  if (error) return 0;
+  return rows.length;
+}

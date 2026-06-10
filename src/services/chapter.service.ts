@@ -2,6 +2,7 @@ import { supabaseAdmin } from '../config/supabase';
 import { AppError, NotFoundError } from '../lib/errors';
 import { logger } from '../lib/logger';
 import { getCoordinatorChapterId } from './admin.service';
+import { createManyNotifications } from './notifications.service';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -369,16 +370,215 @@ export async function adjustHours(
 
 export async function updateSettings(
   userId: string,
-  input: { requiredHours?: number; requirementDeadline?: string | null; riskWindowDays?: number },
+  input: { requiredHours?: number; requirementDeadline?: string | null; riskWindowDays?: number; remindersEnabled?: boolean },
 ) {
   const chapterId = await getCoordinatorChapterId(userId);
   const patch: Record<string, any> = {};
   if (input.requiredHours !== undefined) patch.required_hours = Math.max(0, Math.trunc(input.requiredHours));
   if (input.requirementDeadline !== undefined) patch.requirement_deadline = input.requirementDeadline || null;
   if (input.riskWindowDays !== undefined) patch.risk_window_days = Math.max(1, Math.trunc(input.riskWindowDays));
+  if (input.remindersEnabled !== undefined) patch.reminders_enabled = input.remindersEnabled;
   if (Object.keys(patch).length === 0) return { updated: false };
 
   const { error } = await supabaseAdmin.from('chapters').update(patch).eq('id', chapterId);
   if (error) throw new AppError('update_failed', 'Failed to update settings.', 500);
   return { updated: true };
+}
+
+// ─── Member-status helper (shared by announcements + reminders) ──────────────
+
+interface MemberStatus {
+  id: string;
+  name: string;
+  goal: number;
+  hours: number;
+  remaining: number;
+  status: StudentStatus;
+}
+
+async function membersWithStatus(ctx: ChapterCtx): Promise<MemberStatus[]> {
+  const { data: members } = await supabaseAdmin
+    .from('users')
+    .select('id, name, graduation_year, chapter_goal_override')
+    .eq('chapter_id', ctx.id)
+    .is('deleted_at', null);
+  const list = (members as any[] | null) ?? [];
+  const ids = list.map((m) => m.id as string);
+  const hours = await hoursByMember(ids, ctx.id);
+  return list.map((m) => {
+    const h = hours.get(m.id) ?? 0;
+    const goal = effectiveGoal(ctx, m.graduation_year, m.chapter_goal_override);
+    return {
+      id: m.id,
+      name: m.name ?? 'Student',
+      goal,
+      hours: h,
+      remaining: Math.max(0, goal - h),
+      status: computeStatus(ctx, h, goal),
+    };
+  });
+}
+
+function audienceFilter(students: MemberStatus[], audience: string): MemberStatus[] {
+  switch (audience) {
+    case 'met': return students.filter((s) => s.status === 'met');
+    case 'incomplete': return students.filter((s) => s.status !== 'met' && s.status !== 'no_goal');
+    case 'at_risk': return students.filter((s) => s.status === 'at_risk' || s.status === 'overdue');
+    default: return students;
+  }
+}
+
+// ─── Announcements (mass messaging) ─────────────────────────────────────────
+
+export async function sendAnnouncement(
+  userId: string,
+  input: { title: string; body: string; audience: string },
+): Promise<{ sent: number }> {
+  const ctx = await loadChapterCtx(userId);
+  const students = audienceFilter(await membersWithStatus(ctx), input.audience);
+  const ids = students.map((s) => s.id);
+
+  const sent = await createManyNotifications(ids, {
+    type: 'chapter_announcement',
+    title: input.title.slice(0, 140),
+    body: input.body.slice(0, 1000),
+    actionUrl: '/my-chapter',
+  });
+
+  logger.info({ chapterId: ctx.id, audience: input.audience, sent }, 'chapter_announcement_sent');
+  return { sent };
+}
+
+/** Manual "remind everyone who's behind" — coordinator-triggered. */
+export async function remindBehind(userId: string): Promise<{ sent: number }> {
+  const ctx = await loadChapterCtx(userId);
+  const behind = (await membersWithStatus(ctx)).filter(
+    (s) => s.status !== 'met' && s.status !== 'no_goal',
+  );
+
+  let sent = 0;
+  // Personalised remaining-hours line per student.
+  for (const s of behind) {
+    const due = ctx.deadline ? ` by ${new Date(ctx.deadline).toLocaleDateString()}` : '';
+    const ok = await createManyNotifications([s.id], {
+      type: 'chapter_reminder',
+      title: `${s.remaining} hours left to meet your requirement`,
+      body: `You have ${s.hours}/${s.goal} verified hours. Log ${s.remaining} more${due} to stay on track. Tap to see your progress.`,
+      actionUrl: '/my-chapter',
+    });
+    sent += ok;
+  }
+  logger.info({ chapterId: ctx.id, sent }, 'chapter_remind_behind');
+  return { sent };
+}
+
+// ─── Automated weekly reminders (cron) ──────────────────────────────────────
+
+/** Notify at-risk students in every chapter that has reminders enabled and a
+ *  deadline inside its risk window. Run weekly to avoid spamming. */
+export async function runWeeklyChapterReminders(): Promise<{ chapters: number; sent: number }> {
+  const { data: chapters } = await supabaseAdmin
+    .from('chapters')
+    .select('id, name, required_hours, requirement_deadline, risk_window_days, reminders_enabled')
+    .eq('active', true)
+    .eq('reminders_enabled', true)
+    .not('requirement_deadline', 'is', null);
+
+  let totalSent = 0;
+  let touched = 0;
+
+  for (const c of (chapters as any[] | null) ?? []) {
+    const deadline = c.requirement_deadline as string;
+    const daysLeft = Math.ceil((new Date(deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+    const riskWindow = Number(c.risk_window_days ?? 60);
+    if (daysLeft < 0 || daysLeft > riskWindow) continue; // only nudge inside the window
+
+    // Build a minimal ctx for this chapter
+    const { data: goals } = await supabaseAdmin
+      .from('chapter_cohort_goals')
+      .select('graduation_year, required_hours')
+      .eq('chapter_id', c.id);
+    const cohortGoals = new Map<number, number>();
+    for (const g of (goals as any[] | null) ?? []) cohortGoals.set(Number(g.graduation_year), Number(g.required_hours));
+
+    const ctx: ChapterCtx = {
+      id: c.id,
+      name: c.name,
+      requiredHours: Number(c.required_hours ?? 0),
+      deadline,
+      riskWindowDays: riskWindow,
+      cohortGoals,
+    };
+
+    const atRisk = (await membersWithStatus(ctx)).filter(
+      (s) => s.status === 'at_risk' || s.status === 'overdue',
+    );
+    for (const s of atRisk) {
+      totalSent += await createManyNotifications([s.id], {
+        type: 'chapter_reminder',
+        title: `Reminder: ${s.remaining} hours left`,
+        body: `${daysLeft} days until your ${ctx.name} deadline. You have ${s.hours}/${s.goal} verified hours.`,
+        actionUrl: '/my-chapter',
+      });
+    }
+    touched++;
+  }
+
+  logger.info({ chapters: touched, sent: totalSent }, 'weekly_chapter_reminders_done');
+  return { chapters: touched, sent: totalSent };
+}
+
+// ─── Student-facing: "My Chapter" ───────────────────────────────────────────
+
+export async function getMyChapter(userId: string) {
+  const { data: user } = await supabaseAdmin
+    .from('users')
+    .select('id, chapter_id, graduation_year, chapter_goal_override')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const u = user as any;
+  if (!u?.chapter_id) return null; // not in a chapter
+
+  const { data: chapter } = await supabaseAdmin
+    .from('chapters')
+    .select('id, name, required_hours, requirement_deadline, risk_window_days')
+    .eq('id', u.chapter_id)
+    .maybeSingle();
+  if (!chapter) return null;
+
+  const { data: goals } = await supabaseAdmin
+    .from('chapter_cohort_goals')
+    .select('graduation_year, required_hours')
+    .eq('chapter_id', u.chapter_id);
+  const cohortGoals = new Map<number, number>();
+  for (const g of (goals as any[] | null) ?? []) cohortGoals.set(Number(g.graduation_year), Number(g.required_hours));
+
+  const ctx: ChapterCtx = {
+    id: (chapter as any).id,
+    name: (chapter as any).name,
+    requiredHours: Number((chapter as any).required_hours ?? 0),
+    deadline: (chapter as any).requirement_deadline ?? null,
+    riskWindowDays: Number((chapter as any).risk_window_days ?? 60),
+    cohortGoals,
+  };
+
+  const hoursMap = await hoursByMember([userId], ctx.id);
+  const hours = hoursMap.get(userId) ?? 0;
+  const goal = effectiveGoal(ctx, u.graduation_year, u.chapter_goal_override);
+  const status = computeStatus(ctx, hours, goal);
+
+  const daysToDeadline = ctx.deadline
+    ? Math.ceil((new Date(ctx.deadline).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+    : null;
+
+  return {
+    chapterName: ctx.name,
+    goal,
+    verifiedHours: Math.round(hours * 10) / 10,
+    remaining: Math.max(0, goal - hours),
+    status,
+    deadline: ctx.deadline,
+    daysToDeadline,
+  };
 }

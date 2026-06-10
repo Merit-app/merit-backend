@@ -51,6 +51,7 @@ const settingsSchema = z.object({
   requiredHours: z.number().int().min(0).max(10000).optional(),
   requirementDeadline: z.string().date().nullable().optional(),
   riskWindowDays: z.number().int().min(1).max(365).optional(),
+  remindersEnabled: z.boolean().optional(),
 });
 router.patch('/chapter/settings', validate(settingsSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -81,6 +82,32 @@ const adjustSchema = z.object({
 router.post('/chapter/students/:studentId/adjust', validateUuidParam('studentId'), validate(adjustSchema), async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json(success(await chapter.adjustHours(req.user!.id, req.params.studentId as string, req.body.hours, req.body.reason)));
+  } catch (err) { next(err); }
+});
+
+// GET /my-chapter — student-facing view of their own chapter membership (or null)
+router.get('/my-chapter', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(success(await chapter.getMyChapter(req.user!.id)));
+  } catch (err) { next(err); }
+});
+
+// POST /chapter/announcements  { title, body, audience }
+const announcementSchema = z.object({
+  title: z.string().min(1).max(140),
+  body: z.string().min(1).max(1000),
+  audience: z.enum(['all', 'incomplete', 'at_risk', 'met']).default('all'),
+});
+router.post('/chapter/announcements', validate(announcementSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(success(await chapter.sendAnnouncement(req.user!.id, req.body)));
+  } catch (err) { next(err); }
+});
+
+// POST /chapter/remind-behind
+router.post('/chapter/remind-behind', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(success(await chapter.remindBehind(req.user!.id)));
   } catch (err) { next(err); }
 });
 

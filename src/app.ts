@@ -115,6 +115,18 @@ cron.schedule('0 3 * * 0', async () => {
   }
 }, { timezone: 'UTC' });
 
+// ─── Weekly chapter at-risk reminders — Mondays at 14:00 UTC ────────────────
+import { runWeeklyChapterReminders } from './services/chapter.service';
+cron.schedule('0 14 * * 1', async () => {
+  const { logger } = await import('./lib/logger');
+  try {
+    const result = await runWeeklyChapterReminders();
+    logger.info(result, 'weekly_chapter_reminders_cron_done');
+  } catch (err) {
+    logger.warn({ err }, 'weekly_chapter_reminders_cron_error');
+  }
+}, { timezone: 'UTC' });
+
 const sentryError = getSentryErrorHandler();
 if (sentryError) app.use(sentryError);
 
