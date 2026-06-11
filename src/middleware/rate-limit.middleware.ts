@@ -1,10 +1,36 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin, SUPABASE_MODE } from '../config/supabase';
 import { AppError, RateLimitError } from '../lib/errors';
+import { logger } from '../lib/logger';
 
-/** Fail-closed sentinel — returned instead of next() when the rate-limit DB is unreachable. */
-function rateLimitUnavailable(next: NextFunction) {
-  return next(new AppError('service_unavailable', 'Rate-limit service temporarily unavailable.', 503));
+/**
+ * Actions that stay FAIL-CLOSED when the rate-limit store is unreachable.
+ * These are abuse- or cost-sensitive: letting them through during a DB blip
+ * could enable email bombing, spam, brute-forcing reset codes, or SMS cost.
+ * Everything NOT in this set fails OPEN — a transient DB error must never lock
+ * legitimate users out of session-critical routes (token_refresh, login).
+ */
+const FAIL_CLOSED_ACTIONS = new Set<string>([
+  'password_reset',          // reset-link email bombing
+  'password_reset_submit',   // brute-forcing reset codes
+  'signup',                  // spam account creation
+  'resend_confirmation',     // confirmation email bombing
+  'resend_verification',     // SMS cost abuse
+  'school_lead',             // lead-form spam
+]);
+
+/**
+ * Decide what to do when the rate-limit DB query errors. Sensitive actions
+ * fail closed (503); the rest fail open (allow + log loudly so blips are
+ * visible in Railway logs).
+ */
+function onRateLimitError(action: string, next: NextFunction, detail: unknown) {
+  if (FAIL_CLOSED_ACTIONS.has(action)) {
+    logger.error({ action, detail }, 'rate_limit_store_unavailable_fail_closed');
+    return next(new AppError('service_unavailable', 'Rate-limit service temporarily unavailable.', 503));
+  }
+  logger.error({ action, detail }, 'rate_limit_store_unavailable_fail_open');
+  return next();
 }
 
 /**
@@ -28,7 +54,7 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
         .eq('action', action)
         .gte('date', windowStart);
 
-      if (error) return rateLimitUnavailable(next);
+      if (error) return onRateLimitError(action, next, error.message);
 
       const total = (data ?? []).reduce((sum: number, row: { count: number | null }) => sum + (row.count ?? 0), 0);
       if (total >= limits.max) {
@@ -36,8 +62,8 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
       }
 
       next();
-    } catch {
-      return rateLimitUnavailable(next);
+    } catch (err) {
+      return onRateLimitError(action, next, err instanceof Error ? err.message : String(err));
     }
   };
 }
@@ -64,7 +90,7 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
         .eq('action', action)
         .gte('hour', windowStart); // schema column is hour, not window_start
 
-      if (error) return rateLimitUnavailable(next);
+      if (error) return onRateLimitError(action, next, error.message);
 
       const total = (data ?? []).reduce((sum: number, row: { count: number | null }) => sum + (row.count ?? 0), 0);
       if (total >= max) {
@@ -72,8 +98,8 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
       }
 
       next();
-    } catch {
-      return rateLimitUnavailable(next);
+    } catch (err) {
+      return onRateLimitError(action, next, err instanceof Error ? err.message : String(err));
     }
   };
 }
