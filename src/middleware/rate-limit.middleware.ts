@@ -4,6 +4,26 @@ import { AppError, RateLimitError } from '../lib/errors';
 import { logger } from '../lib/logger';
 
 /**
+ * Hard ceiling on how long a rate-limit lookup may take. The Supabase query has
+ * no inherent timeout, so when the database is unreachable (e.g. a regional
+ * cloud incident) the `await` hangs indefinitely and the whole request stalls
+ * — including login and token refresh. Racing it against a short timer turns a
+ * hang into a fast, handled "store unavailable" error.
+ */
+const RL_QUERY_TIMEOUT_MS = 2500;
+
+function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('rate_limit_query_timeout')), ms);
+  });
+  return Promise.race([
+    Promise.resolve(p).finally(() => clearTimeout(timer)),
+    timeout,
+  ]) as Promise<T>;
+}
+
+/**
  * Actions that stay FAIL-CLOSED when the rate-limit store is unreachable.
  * These are abuse- or cost-sensitive: letting them through during a DB blip
  * could enable email bombing, spam, brute-forcing reset codes, or SMS cost.
@@ -47,12 +67,15 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
         .toISOString()
         .slice(0, 10); // 'YYYY-MM-DD' — matches the date column type
 
-      const { data, error } = await supabaseAdmin
-        .from('rate_limits')
-        .select('count')
-        .eq('user_id', req.user.id)
-        .eq('action', action)
-        .gte('date', windowStart);
+      const { data, error } = await withTimeout(
+        supabaseAdmin
+          .from('rate_limits')
+          .select('count')
+          .eq('user_id', req.user.id)
+          .eq('action', action)
+          .gte('date', windowStart),
+        RL_QUERY_TIMEOUT_MS,
+      );
 
       if (error) return onRateLimitError(action, next, error.message);
 
@@ -83,12 +106,15 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
         'unknown';
       const windowStart = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
-      const { data, error } = await supabaseAdmin
-        .from('ip_rate_limits')
-        .select('count')
-        .eq('ip_address', ip)   // schema column is ip_address, not ip
-        .eq('action', action)
-        .gte('hour', windowStart); // schema column is hour, not window_start
+      const { data, error } = await withTimeout(
+        supabaseAdmin
+          .from('ip_rate_limits')
+          .select('count')
+          .eq('ip_address', ip)   // schema column is ip_address, not ip
+          .eq('action', action)
+          .gte('hour', windowStart), // schema column is hour, not window_start
+        RL_QUERY_TIMEOUT_MS,
+      );
 
       if (error) return onRateLimitError(action, next, error.message);
 
