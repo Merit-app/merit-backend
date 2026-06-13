@@ -1,0 +1,9 @@
+{
+  "experimentalServices": {
+    "web": {
+      "entrypoint": "src/server.ts",
+      "routePrefix": "/",
+      "buildCommand": "npm run build"
+    }
+  }
+}
