@@ -55,6 +55,56 @@ function onRateLimitError(action: string, next: NextFunction, detail: unknown) {
 }
 
 /**
+ * Best-effort counter increments. These MUST never throw into the request path:
+ * a failed write should leave the request untouched (and must not trip the
+ * fail-closed 503 on sensitive actions). Without these the middleware only ever
+ * reads a counter that nothing writes, so the limits never actually enforce.
+ */
+async function recordUserHit(userId: string, action: string) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: row } = await supabaseAdmin
+      .from('rate_limits')
+      .select('count')
+      .eq('user_id', userId)
+      .eq('action', action)
+      .eq('date', today)
+      .maybeSingle();
+    await supabaseAdmin
+      .from('rate_limits')
+      .upsert(
+        { user_id: userId, action, date: today, count: ((row as any)?.count ?? 0) + 1 },
+        { onConflict: 'user_id,action,date' },
+      );
+  } catch (err) {
+    logger.warn({ action, err: err instanceof Error ? err.message : String(err) }, 'rate_limit_record_failed');
+  }
+}
+
+async function recordIpHit(ip: string, action: string) {
+  try {
+    const bucket = new Date();
+    bucket.setMinutes(0, 0, 0); // truncate to the hour
+    const hour = bucket.toISOString();
+    const { data: row } = await supabaseAdmin
+      .from('ip_rate_limits')
+      .select('count')
+      .eq('ip_address', ip)
+      .eq('action', action)
+      .eq('hour', hour)
+      .maybeSingle();
+    await supabaseAdmin
+      .from('ip_rate_limits')
+      .upsert(
+        { ip_address: ip, action, hour, count: ((row as any)?.count ?? 0) + 1 },
+        { onConflict: 'ip_address,action,hour' },
+      );
+  } catch (err) {
+    logger.warn({ action, err: err instanceof Error ? err.message : String(err) }, 'ip_rate_limit_record_failed');
+  }
+}
+
+/**
  * Per-user rate limit.
  * Schema: rate_limits(user_id, action, date date, count int)
  * One row per (user, action, day) — summed across the window.
@@ -85,6 +135,7 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
         return next(new RateLimitError({ action, limit: limits.max, windowHours }));
       }
 
+      void recordUserHit(req.user.id, action); // best-effort, never blocks
       next();
     } catch (err) {
       return onRateLimitError(action, next, err instanceof Error ? err.message : String(err));
@@ -124,6 +175,7 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
         return next(new RateLimitError({ action, limit: max, windowHours, ip }));
       }
 
+      void recordIpHit(ip, action); // best-effort, never blocks
       next();
     } catch (err) {
       return onRateLimitError(action, next, err instanceof Error ? err.message : String(err));
