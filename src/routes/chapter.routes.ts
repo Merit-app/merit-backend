@@ -77,6 +77,13 @@ router.patch('/chapter/students/:studentId/goal', validateUuidParam('studentId')
   } catch (err) { next(err); }
 });
 
+// DELETE /chapter/students/:studentId — unlink a student from the chapter
+router.delete('/chapter/students/:studentId', validateUuidParam('studentId'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(success(await chapter.removeStudent(req.user!.id, req.params.studentId as string)));
+  } catch (err) { next(err); }
+});
+
 // POST /chapter/students/:studentId/adjust  { hours: number, reason?: string }
 const adjustSchema = z.object({
   hours: z.number().refine((n) => n !== 0, 'Hours must be non-zero').refine((n) => Math.abs(n) <= 10000, 'Too large'),

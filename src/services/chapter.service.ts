@@ -303,6 +303,20 @@ async function assertStudentInChapter(chapterId: string, studentId: string) {
   if (!data || (data as any).chapter_id !== chapterId) throw new NotFoundError('Student');
 }
 
+export async function removeStudent(userId: string, studentId: string) {
+  const ctx = await loadChapterCtx(userId);
+  await assertPermission(userId, ctx.id, 'manage_team');
+  await assertStudentInChapter(ctx.id, studentId);
+  const { error } = await supabaseAdmin
+    .from('users')
+    .update({ chapter_id: null, chapter_consent_at: null, chapter_goal_override: null })
+    .eq('id', studentId)
+    .eq('chapter_id', ctx.id); // guard: only unlink if still in THIS chapter
+  if (error) throw new AppError('update_failed', 'Failed to remove student.', 500);
+  void logChapterAction(ctx.id, userId, 'remove_student', { targetUserId: studentId });
+  return { removed: true };
+}
+
 export async function setStudentOverride(userId: string, studentId: string, hours: number | null) {
   const ctx = await loadChapterCtx(userId);
   await assertPermission(userId, ctx.id, 'edit_goals');

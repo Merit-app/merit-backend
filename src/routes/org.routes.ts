@@ -88,6 +88,44 @@ router.post('/:orgId/events', requireAuth, requireOrgPlan('pro'), async (req: Re
   }
 });
 
+// PATCH /org/:orgId/events/:eventId — edit an event (draft or published)
+router.patch('/:orgId/events/:eventId', requireAuth, requireOrgPlan('pro'), async (req: Request, res: Response, _next: NextFunction) => {
+  try {
+    await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+
+    const schema = z.object({
+      title: z.string().min(2).max(100).optional(),
+      description: z.string().max(500).optional(),
+      location: z.string().max(200).optional(),
+      locationUrl: z.string().url().optional().or(z.literal('')),
+      program: z.string().max(100).optional(),
+      startTime: z.string().datetime().optional(),
+      endTime: z.string().datetime().optional(),
+      maxVolunteers: z.number().int().positive().optional(),
+      hoursValue: z.number().positive().optional(),
+      autoLogHours: z.boolean().optional(),
+    });
+
+    const body = schema.parse(req.body);
+    const event = await eventsService.updateOrgEvent({
+      ...body,
+      orgId: req.params.orgId as string,
+      eventId: req.params.eventId as string,
+    });
+    return res.json({ data: event });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    if (err.name === 'ZodError') {
+      return res.status(400).json({ error: 'Invalid input', details: err.errors });
+    }
+    if (err.statusCode === 404) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+    logger.error(err, 'update_event_error');
+    return res.status(500).json({ error: 'Failed to update event' });
+  }
+});
+
 // GET /org/:orgId/events/:eventId
 router.get('/:orgId/events/:eventId', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
   try {

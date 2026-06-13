@@ -460,6 +460,41 @@ export async function importRoster(userId: string, rows: RosterRow[]): Promise<R
   return result;
 }
 
+export async function resendInvite(userId: string, inviteId: string) {
+  const chapterId = await getCoordinatorChapterId(userId);
+
+  const { data: invite } = await supabaseAdmin
+    .from('chapter_invites')
+    .select('id, chapter_id, email, name, accepted_at')
+    .eq('id', inviteId)
+    .maybeSingle();
+
+  const i = invite as any;
+  if (!i || i.chapter_id !== chapterId) throw new NotFoundError('Invite');
+  if (i.accepted_at) throw new AppError('already_accepted', 'This student has already joined.', 409);
+
+  // Mint a fresh token and reset the 7-day expiry so the resent link is valid.
+  const token = generateUrlSafeToken(32);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabaseAdmin
+    .from('chapter_invites')
+    .update({ invite_token: token, expires_at: expiresAt })
+    .eq('id', inviteId);
+  if (error) throw new AppError('resend_failed', 'Failed to resend invite.', 500);
+
+  const { data: chapter } = await supabaseAdmin
+    .from('chapters')
+    .select('name')
+    .eq('id', chapterId)
+    .maybeSingle();
+
+  void sendRosterInviteEmails((chapter as any)?.name ?? 'your chapter', [
+    { email: i.email, name: i.name ?? '', inviteToken: token },
+  ]);
+  logger.info({ userId, chapterId, inviteId }, 'chapter_invite_resent');
+  return { resent: true };
+}
+
 export async function revokeInvite(userId: string, inviteId: string) {
   const chapterId = await getCoordinatorChapterId(userId);
 

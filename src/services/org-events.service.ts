@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 import { sendSms } from './twilio.service';
+import { NotFoundError } from '../lib/errors';
 
 // ── List events for an org ────────────────────────────────────────────────────
 
@@ -78,6 +79,48 @@ export async function createOrgEvent(params: {
     .single();
 
   if (error) throw error;
+  return data;
+}
+
+// ── Update an event (draft or published) ──────────────────────────────────────
+
+export async function updateOrgEvent(params: {
+  orgId: string;
+  eventId: string;
+  title?: string;
+  description?: string;
+  location?: string;
+  locationUrl?: string;
+  program?: string;
+  startTime?: string;
+  endTime?: string;
+  maxVolunteers?: number;
+  hoursValue?: number;
+  autoLogHours?: boolean;
+}) {
+  const patch: Record<string, unknown> = {};
+  if (params.title !== undefined) patch.title = params.title;
+  if (params.description !== undefined) patch.description = params.description;
+  if (params.location !== undefined) patch.location = params.location;
+  if (params.locationUrl !== undefined) patch.location_url = params.locationUrl;
+  if (params.program !== undefined) patch.program = params.program;
+  if (params.startTime !== undefined) patch.start_time = params.startTime;
+  if (params.endTime !== undefined) patch.end_time = params.endTime;
+  if (params.maxVolunteers !== undefined) patch.max_volunteers = params.maxVolunteers;
+  if (params.hoursValue !== undefined) patch.hours_value = params.hoursValue;
+  if (params.autoLogHours !== undefined) patch.auto_log_hours = params.autoLogHours;
+
+  const { data, error } = await supabaseAdmin
+    .from('org_events')
+    .update(patch)
+    .eq('id', params.eventId)
+    .eq('org_id', params.orgId) // scope guard — can't edit another org's event
+    .not('status', 'in', '("completed","cancelled")') // don't edit a finished event
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new NotFoundError('Event');
   return data;
 }
 

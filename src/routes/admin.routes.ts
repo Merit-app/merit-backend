@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import { validateUuidParam } from '../middleware/validate-uuid.middleware';
+import { rateLimit } from '../middleware/rate-limit.middleware';
 import { z } from 'zod';
 import * as adminService from '../services/admin.service';
 import { success } from '../utils/shape';
@@ -177,6 +178,21 @@ router.post(
     try {
       const data = await adminService.createInvite(req.user!.id, req.body.email);
       res.status(201).json(success(data));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// POST /admin/invites/:inviteId/resend
+router.post(
+  '/admin/invites/:inviteId/resend',
+  validateUuidParam('inviteId'),
+  rateLimit('invite_resend', { max: 50 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await adminService.resendInvite(req.user!.id, req.params.inviteId as string);
+      res.json(success(data));
     } catch (err) {
       next(err);
     }
