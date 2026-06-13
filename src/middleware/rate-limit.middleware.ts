@@ -37,6 +37,7 @@ const FAIL_CLOSED_ACTIONS = new Set<string>([
   'resend_confirmation',     // confirmation email bombing
   'resend_verification',     // SMS cost abuse
   'school_lead',             // lead-form spam
+  'magic_link',              // supervisor magic-link email bombing
 ]);
 
 /**

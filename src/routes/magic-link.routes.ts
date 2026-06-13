@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { validate } from '../middleware/validate.middleware';
+import { ipRateLimit } from '../middleware/rate-limit.middleware';
 import { z } from 'zod';
 import * as magicLinkService from '../services/magic-link.service';
 import { success } from '../utils/shape';
@@ -18,6 +19,7 @@ const verifySchema = z.object({
 // POST /magic/supervisor-login — send magic link to supervisor
 router.post(
   '/magic/supervisor-login',
+  ipRateLimit('magic_link', 5, 1), // anti-abuse: max 5 magic-link emails per IP per hour
   validate(supervisorLoginSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

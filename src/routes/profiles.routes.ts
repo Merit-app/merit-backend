@@ -91,6 +91,7 @@ router.get(
         .from('users')
         .select('username, updated_at')
         .eq('profile_public', true)
+        .is('deleted_at', null)
         .not('username', 'is', null)
         .order('updated_at', { ascending: false })
         .limit(1000);
