@@ -23,6 +23,12 @@ function withTimeout<T>(p: PromiseLike<T>, ms: number): Promise<T> {
   ]) as Promise<T>;
 }
 
+/** Shape of a Supabase `.select('count')` response, used to type the timed queries. */
+type CountQueryResult = {
+  data: { count: number | null }[] | null;
+  error: { message: string } | null;
+};
+
 /**
  * Actions that stay FAIL-CLOSED when the rate-limit store is unreachable.
  * These are abuse- or cost-sensitive: letting them through during a DB blip
@@ -118,13 +124,13 @@ export function rateLimit(action: string, limits: { max: number; windowHours?: n
         .toISOString()
         .slice(0, 10); // 'YYYY-MM-DD' — matches the date column type
 
-      const { data, error } = await withTimeout(
+      const { data, error } = await withTimeout<CountQueryResult>(
         supabaseAdmin
           .from('rate_limits')
           .select('count')
           .eq('user_id', req.user.id)
           .eq('action', action)
-          .gte('date', windowStart),
+          .gte('date', windowStart) as unknown as PromiseLike<CountQueryResult>,
         RL_QUERY_TIMEOUT_MS,
       );
 
@@ -158,13 +164,13 @@ export function ipRateLimit(action: string, max: number, windowHours = 1) {
         'unknown';
       const windowStart = new Date(Date.now() - windowHours * 60 * 60 * 1000).toISOString();
 
-      const { data, error } = await withTimeout(
+      const { data, error } = await withTimeout<CountQueryResult>(
         supabaseAdmin
           .from('ip_rate_limits')
           .select('count')
           .eq('ip_address', ip)   // schema column is ip_address, not ip
           .eq('action', action)
-          .gte('hour', windowStart), // schema column is hour, not window_start
+          .gte('hour', windowStart) as unknown as PromiseLike<CountQueryResult>, // schema column is hour, not window_start
         RL_QUERY_TIMEOUT_MS,
       );
 

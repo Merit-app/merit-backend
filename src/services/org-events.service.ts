@@ -115,7 +115,7 @@ export async function updateOrgEvent(params: {
     .update(patch)
     .eq('id', params.eventId)
     .eq('org_id', params.orgId) // scope guard — can't edit another org's event
-    .not('status', 'in', '("completed","cancelled")') // don't edit a finished event
+    .not('status', 'in', '(completed,cancelled)') // don't edit a finished event
     .select()
     .maybeSingle();
 
