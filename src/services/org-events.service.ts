@@ -182,9 +182,10 @@ export async function publishEvent(eventId: string, orgId: string) {
 
   if (error || !event) throw new Error('Event not found');
 
-  // Notify the org's full volunteer audience: anyone who has logged a session
-  // here (any status) OR registered interest — not just verified volunteers.
-  const [{ data: sessionRows }, { data: interestRows }] = await Promise.all([
+  // Notify the org's full audience: anyone who has logged a session here
+  // (any status), registered interest, OR follows the org. Following an org
+  // is an explicit "keep me posted" signal, so followers get event invites too.
+  const [{ data: sessionRows }, { data: interestRows }, { data: followRows }] = await Promise.all([
     supabaseAdmin
       .from('sessions')
       .select('user_id')
@@ -194,9 +195,14 @@ export async function publishEvent(eventId: string, orgId: string) {
       .from('org_volunteer_interests')
       .select('user_id')
       .eq('org_id', orgId),
+    supabaseAdmin
+      .from('user_org_follows')
+      .select('user_id')
+      .eq('org_id', orgId),
   ]);
 
   const audienceIds = [...new Set<string>([
+    ...((followRows ?? []).map((r: any) => r.user_id)),
     ...((sessionRows ?? []).map((r: any) => r.user_id)),
     ...((interestRows ?? []).map((r: any) => r.user_id)),
   ])];
