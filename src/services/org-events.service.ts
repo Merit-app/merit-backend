@@ -629,18 +629,18 @@ export async function getMyUpcomingEvents(userId: string, limit = 5) {
 
   const nowMs = Date.now();
   const rows = (signups ?? [])
-    .map((s: any) => ({ signup: s, event: s.org_events }))
-    .filter(({ event }) =>
-      event &&
-      event.status !== 'cancelled' &&
-      new Date(event.end_time).getTime() >= nowMs,
+    .map((s: any) => ({ signup: s, event: s.org_events as any }))
+    .filter((r: { signup: any; event: any }) =>
+      r.event &&
+      r.event.status !== 'cancelled' &&
+      new Date(r.event.end_time).getTime() >= nowMs,
     )
-    .sort((a, b) =>
+    .sort((a: { event: any }, b: { event: any }) =>
       new Date(a.event.start_time).getTime() - new Date(b.event.start_time).getTime(),
     )
     .slice(0, limit);
 
-  return rows.map(({ signup, event }) => ({
+  return rows.map(({ signup, event }: { signup: any; event: any }) => ({
     id: event.id,
     title: event.title,
     description: event.description,
