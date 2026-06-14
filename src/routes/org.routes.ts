@@ -174,6 +174,26 @@ router.post('/:orgId/events/:eventId/checkin/:userId', requireAuth, async (req: 
   }
 });
 
+// POST /org/:orgId/events/:eventId/confirm  { userIds: string[] }
+// Batch-confirm attendance + auto-log hours for the selected volunteers.
+router.post('/:orgId/events/:eventId/confirm', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+  try {
+    await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+    const userIds = Array.isArray(req.body?.userIds) ? req.body.userIds.filter((x: unknown) => typeof x === 'string') : [];
+    const result = await eventsService.confirmAttendanceMany({
+      eventId: req.params.eventId as string,
+      orgId: req.params.orgId as string,
+      userIds,
+      confirmedBy: req.user!.id,
+    });
+    return res.json({ data: result });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    logger.error(err, 'confirm_attendance_bulk_error');
+    return res.status(500).json({ error: 'Failed to confirm attendance' });
+  }
+});
+
 // POST /org/:orgId/events/:eventId/confirm/:userId
 // Confirm one volunteer attended + auto-log their hours immediately.
 router.post('/:orgId/events/:eventId/confirm/:userId', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {

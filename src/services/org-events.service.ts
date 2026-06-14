@@ -552,6 +552,33 @@ export async function markNoShow(params: {
   return { marked: true };
 }
 
+// ── Confirm attendance for many volunteers at once ────────────────────────────
+// Powers the "select volunteers → Log hours" batch flow on the event page.
+
+export async function confirmAttendanceMany(params: {
+  eventId: string;
+  orgId: string;
+  userIds: string[];
+  confirmedBy: string;
+}) {
+  const { eventId, orgId, userIds, confirmedBy } = params;
+  let logged = 0;
+  let alreadyLogged = 0;
+  let hoursEach = 0;
+
+  for (const userId of userIds) {
+    try {
+      const r = await confirmAttendance({ eventId, orgId, userId, confirmedBy });
+      if (r.alreadyLogged) alreadyLogged++;
+      else { logged++; hoursEach = r.hours; }
+    } catch (err) {
+      logger.warn({ err, eventId, userId }, 'confirm_many_one_failed');
+    }
+  }
+
+  return { logged, alreadyLogged, hoursEach };
+}
+
 // ── Complete event + auto-log hours ───────────────────────────────────────────
 
 export async function completeEvent(eventId: string, orgId: string) {
