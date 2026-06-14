@@ -1,7 +1,12 @@
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 import { sendSms } from './twilio.service';
+import { sendEmail } from './resend.service';
+import { createManyNotifications, createNotification } from './notifications.service';
+import { env } from '../config/env';
 import { NotFoundError } from '../lib/errors';
+
+const APP_URL = env.FRONTEND_URL ?? 'https://meritco.app';
 
 // ── List events for an org ────────────────────────────────────────────────────
 
@@ -173,25 +178,24 @@ export async function publishEvent(eventId: string, orgId: string) {
 
   if (error || !event) throw new Error('Event not found');
 
-  // Get verified volunteers for this org that have a phone on record
-  // (users.phone is populated when students verify their own number)
-  const { data: sessions } = await supabaseAdmin
-    .from('sessions')
-    .select('users!sessions_user_id_fkey(id, name, phone)')
-    .eq('org_id', orgId)
-    .eq('status', 'verified')
-    .is('deleted_at', null);
+  // Notify the org's full volunteer audience: anyone who has logged a session
+  // here (any status) OR registered interest — not just verified volunteers.
+  const [{ data: sessionRows }, { data: interestRows }] = await Promise.all([
+    supabaseAdmin
+      .from('sessions')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .is('deleted_at', null),
+    supabaseAdmin
+      .from('org_volunteer_interests')
+      .select('user_id')
+      .eq('org_id', orgId),
+  ]);
 
-  const seen = new Set<string>();
-  const toNotify: { name: string; phone: string }[] = [];
-
-  for (const s of sessions ?? []) {
-    const user = (s as any).users;
-    if (user?.phone && !seen.has(user.id)) {
-      seen.add(user.id);
-      toNotify.push({ name: user.name, phone: user.phone });
-    }
-  }
+  const audienceIds = [...new Set<string>([
+    ...((sessionRows ?? []).map((r: any) => r.user_id)),
+    ...((interestRows ?? []).map((r: any) => r.user_id)),
+  ])];
 
   const orgName = (event as any).organizations?.name ?? 'Your organization';
   const startDate = new Date(event.start_time).toLocaleDateString('en-CA', {
@@ -200,24 +204,128 @@ export async function publishEvent(eventId: string, orgId: string) {
   const startTime = new Date(event.start_time).toLocaleTimeString('en-CA', {
     hour: 'numeric', minute: '2-digit',
   });
-
-  const body =
-    `${orgName}: New volunteer shift — ${event.title} on ${startDate} at ${startTime}. ` +
-    `${event.location ? `Location: ${event.location}. ` : ''}` +
-    `Sign up at meritco.app/events/${eventId}`;
+  const eventUrl = `${APP_URL}/events/${eventId}`;
 
   let notified = 0;
-  for (const volunteer of toNotify.slice(0, 100)) {
-    try {
-      await sendSms({ to: volunteer.phone, body });
-      notified++;
-    } catch (err) {
-      logger.warn({ phone: volunteer.phone.slice(-4), err }, 'sms_notify_failed');
+
+  if (audienceIds.length) {
+    const { data: users } = await supabaseAdmin
+      .from('users')
+      .select('id, name, email, phone')
+      .in('id', audienceIds);
+
+    const smsBody =
+      `${orgName}: New volunteer shift — ${event.title} on ${startDate} at ${startTime}. ` +
+      `${event.location ? `Location: ${event.location}. ` : ''}` +
+      `Tap to participate: ${eventUrl}`;
+
+    const html = eventEmailHtml({
+      orgName, title: event.title, startDate, startTime,
+      location: event.location, description: event.description, eventUrl,
+    });
+
+    const reached = new Set<string>();
+    for (const user of (users ?? []).slice(0, 500) as any[]) {
+      if (user.phone) {
+        try { await sendSms({ to: user.phone, body: smsBody }); reached.add(user.id); }
+        catch (err) { logger.warn({ err }, 'event_sms_failed'); }
+      }
+      if (user.email) {
+        try {
+          await sendEmail({ to: user.email, subject: `${orgName}: ${event.title} — can you make it?`, html });
+          reached.add(user.id);
+        } catch (err) { logger.warn({ err }, 'event_email_failed'); }
+      }
     }
+
+    // Guaranteed in-app notification with a one-click participate link.
+    await createManyNotifications(audienceIds, {
+      type: 'event',
+      title: `New shift from ${orgName}`,
+      body: `${event.title} — ${startDate} at ${startTime}. Tap to participate.`,
+      actionUrl: `/events/${eventId}`,
+    });
+    audienceIds.forEach((id) => reached.add(id));
+    notified = reached.size;
   }
 
   logger.info({ eventId, notified }, 'event_published');
   return { event, notified };
+}
+
+/** Branded HTML for an event invitation email with a Participate button. */
+function eventEmailHtml(p: {
+  orgName: string; title: string; startDate: string; startTime: string;
+  location?: string | null; description?: string | null; eventUrl: string;
+}) {
+  return `
+  <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+    <p style="font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6B7280;margin:0 0 6px;">
+      ${p.orgName} · New volunteer shift
+    </p>
+    <h1 style="font-size:20px;color:#111827;margin:0 0 12px;">${p.title}</h1>
+    <table style="font-size:14px;color:#374151;border-collapse:collapse;margin-bottom:16px;">
+      <tr><td style="padding:2px 12px 2px 0;color:#6B7280;">When</td><td>${p.startDate} at ${p.startTime}</td></tr>
+      ${p.location ? `<tr><td style="padding:2px 12px 2px 0;color:#6B7280;">Where</td><td>${p.location}</td></tr>` : ''}
+    </table>
+    ${p.description ? `<p style="font-size:14px;line-height:1.55;color:#374151;margin:0 0 20px;">${p.description}</p>` : ''}
+    <a href="${p.eventUrl}" style="display:inline-block;background:#111827;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:10px;">
+      Click here to participate →
+    </a>
+    <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;" />
+    <p style="color:#9CA3AF;font-size:12px;margin:0;">
+      You're receiving this because you volunteered with ${p.orgName} on Merit.
+    </p>
+  </div>`;
+}
+
+// ── Student-facing: get one event by id (for the participate page) ─────────────
+
+export async function getStudentEvent(eventId: string, userId?: string) {
+  const { data: event, error } = await supabaseAdmin
+    .from('org_events')
+    .select(`
+      id, title, description, location, location_url, program,
+      start_time, end_time, max_volunteers, status, hours_value, org_id,
+      organizations!org_events_org_id_fkey (name, slug),
+      event_signups(count)
+    `)
+    .eq('id', eventId)
+    .single();
+
+  if (error || !event) throw new NotFoundError('Event');
+
+  let mySignup: string | null = null;
+  if (userId) {
+    const { data: signup } = await supabaseAdmin
+      .from('event_signups')
+      .select('status')
+      .eq('event_id', eventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    mySignup = (signup as any)?.status ?? null;
+  }
+
+  const signupCount = (event as any).event_signups?.[0]?.count ?? 0;
+  return {
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    locationUrl: (event as any).location_url,
+    program: event.program,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    maxVolunteers: event.max_volunteers,
+    hoursValue: event.hours_value,
+    status: event.status,
+    orgId: event.org_id,
+    orgName: (event as any).organizations?.name ?? 'Organization',
+    orgSlug: (event as any).organizations?.slug ?? null,
+    signupCount,
+    spotsLeft: event.max_volunteers ? Math.max(0, event.max_volunteers - signupCount) : null,
+    mySignupStatus: mySignup,
+  };
 }
 
 // ── Student signup for event ──────────────────────────────────────────────────
@@ -252,11 +360,26 @@ export async function signupForEvent(params: {
       event_id: eventId,
       user_id: userId,
       status: isWaitlisted ? 'waitlisted' : 'signed_up',
-    })
+    }, { onConflict: 'event_id,user_id' })
     .select()
     .single();
 
   if (error) throw error;
+
+  // Confirmation notification for the student's inbox.
+  const startDate = new Date(event.start_time).toLocaleDateString('en-CA', {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
+  await createNotification({
+    userId,
+    type: 'event',
+    title: isWaitlisted ? `You're on the waitlist` : `You're signed up!`,
+    body: isWaitlisted
+      ? `${event.title} on ${startDate} is full — we'll let you know if a spot opens.`
+      : `${event.title} on ${startDate}. See you there!`,
+    actionUrl: `/events/${eventId}`,
+  });
+
   return { signup: data, isWaitlisted };
 }
 

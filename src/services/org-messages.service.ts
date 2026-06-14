@@ -1,9 +1,31 @@
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 import { sendSms } from './twilio.service';
+import { sendEmail } from './resend.service';
+import { createManyNotifications } from './notifications.service';
 
 function toStringArray(rows: unknown[] | null | undefined): string[] {
   return (rows ?? []).map((s: any) => s.user_id as string);
+}
+
+/** Minimal branded HTML wrapper for a plain-text announcement. */
+function announcementHtml(orgName: string, message: string) {
+  const safe = message
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br/>');
+  return `
+  <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
+    <p style="font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6B7280;margin:0 0 8px;">
+      ${orgName}
+    </p>
+    <div style="font-size:15px;line-height:1.55;color:#111827;">${safe}</div>
+    <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;" />
+    <p style="color:#9CA3AF;font-size:12px;margin:0;">
+      You're receiving this because you volunteered with ${orgName} on Merit.
+    </p>
+  </div>`;
 }
 
 export async function sendBulkMessage(params: {
@@ -40,7 +62,7 @@ export async function sendBulkMessage(params: {
       .from('event_signups')
       .select('user_id')
       .eq('event_id', eventId)
-      .in('status', ['signed_up', 'waitlisted']);
+      .in('status', ['signed_up', 'waitlisted', 'checked_in']);
     userIds = toStringArray(data);
   } else if (filter === 'active_30d') {
     const since = new Date();
@@ -65,29 +87,68 @@ export async function sendBulkMessage(params: {
   }
 
   if (!userIds.length) {
-    return { sent: 0, failed: 0 };
+    return { sent: 0, failed: 0, viaSms: 0, viaEmail: 0, inApp: 0 };
   }
 
-  // Fetch all matched users — include those without phone so we can
-  // count them in the "sent" response even if SMS isn't possible.
+  // Org name for the email/in-app header.
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
+    .select('name')
+    .eq('id', orgId)
+    .single();
+  const orgName = (org as any)?.name ?? 'Your organization';
+
+  // Fetch all matched users — include those without phone/email so we can
+  // still reach them in-app and count reach accurately.
   const { data: users } = await supabaseAdmin
     .from('users')
-    .select('id, phone')
+    .select('id, name, email, phone')
     .in('id', userIds);
 
-  let sent = 0;
+  const subject = `${orgName}: ${message.slice(0, 60)}${message.length > 60 ? '…' : ''}`;
+  const html = announcementHtml(orgName, message);
+
+  let viaSms = 0;
+  let viaEmail = 0;
   let failed = 0;
+  const reached = new Set<string>();
 
   for (const user of (users ?? []) as any[]) {
-    if (!user.phone) continue;
-    try {
-      await sendSms({ to: user.phone as string, body: message });
-      sent++;
-    } catch (err) {
-      logger.warn({ userId: user.id }, 'bulk_sms_failed');
-      failed++;
+    let any = false;
+    if (user.phone) {
+      try {
+        await sendSms({ to: user.phone as string, body: `${orgName}: ${message}` });
+        viaSms++;
+        any = true;
+      } catch {
+        logger.warn({ userId: user.id }, 'bulk_sms_failed');
+      }
     }
+    if (user.email) {
+      try {
+        // sendEmail swallows its own errors, so this counts as an attempt.
+        await sendEmail({ to: user.email as string, subject, html });
+        viaEmail++;
+        any = true;
+      } catch {
+        logger.warn({ userId: user.id }, 'bulk_email_failed');
+      }
+    }
+    if (any) reached.add(user.id);
+    else failed++;
   }
+
+  // Always drop an in-app notification for every recipient — this is the
+  // channel that's guaranteed to land in their Merit inbox.
+  const inApp = await createManyNotifications(userIds, {
+    type: 'org_message',
+    title: `${orgName} sent an announcement`,
+    body: message,
+    actionUrl: '/inbox',
+  });
+  for (const id of userIds) reached.add(id);
+
+  const sent = reached.size;
 
   await supabaseAdmin.from('org_messages').insert({
     org_id: orgId,
@@ -95,10 +156,10 @@ export async function sendBulkMessage(params: {
     message,
     recipient_count: sent,
     recipient_filter: { filter, eventId },
-    status: failed > 0 && sent === 0 ? 'failed' : failed > 0 ? 'partial' : 'sent',
+    status: sent === 0 ? 'failed' : failed > 0 ? 'partial' : 'sent',
   });
 
-  return { sent, failed };
+  return { sent, failed, viaSms, viaEmail, inApp };
 }
 
 export async function getMessageHistory(orgId: string) {

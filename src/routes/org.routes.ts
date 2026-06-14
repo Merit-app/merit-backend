@@ -81,10 +81,10 @@ router.post('/:orgId/events', requireAuth, requireOrgPlan('pro'), async (req: Re
   } catch (err: any) {
     if (handleNotAdmin(err, res)) return;
     if (err.name === 'ZodError') {
-      return res.status(400).json({ error: 'Invalid input', details: err.errors });
+      return res.status(400).json({ error: err.errors?.[0]?.message ?? 'Invalid input', details: err.errors });
     }
     logger.error(err, 'create_event_error');
-    return res.status(500).json({ error: 'Failed to create event' });
+    return res.status(500).json({ error: err.message ?? 'Failed to create event' });
   }
 });
 

@@ -72,6 +72,7 @@ import scholarshipsRouter from './routes/scholarships.routes';
 import orgBillingRouter from './routes/org-billing.routes';
 import schoolOnboardingRouter from './routes/school-onboarding.routes';
 import chapterRouter from './routes/chapter.routes';
+import eventsRouter from './routes/events.routes';
 app.use('/', healthRouter);
 app.use('/', authRouter);
 app.use('/', usersRouter);
@@ -95,6 +96,7 @@ app.use('/', scholarshipsRouter);
 app.use('/org', orgBillingRouter);
 app.use('/', schoolOnboardingRouter);
 app.use('/', chapterRouter);
+app.use('/', eventsRouter);
 
 // 404 & error handling
 app.use(notFound);
