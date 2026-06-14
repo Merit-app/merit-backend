@@ -5,6 +5,18 @@ import { success } from '../utils/shape';
 
 const router = Router();
 
+// GET /me/upcoming-events — events the signed-in student has signed up for that
+// haven't ended yet (for the dashboard "Upcoming event" card).
+// NOTE: declared before '/events/:eventId' so it isn't shadowed by the param route.
+router.get('/me/upcoming-events', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const events = await eventsService.getMyUpcomingEvents(req.user!.id);
+    return res.json(success(events));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /events/:eventId — student-facing event detail (for the participate page).
 // Only needs the event id; resolves the org itself.
 router.get('/events/:eventId', requireAuth, async (req: Request, res: Response, next: NextFunction) => {

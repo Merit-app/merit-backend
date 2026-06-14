@@ -138,7 +138,7 @@ export async function getEventDetail(eventId: string) {
       *,
       organizations!org_events_org_id_fkey (name, slug),
       event_signups (
-        id, status, signed_up_at, checked_in_at,
+        id, status, signed_up_at, checked_in_at, hours_logged_at,
         users!event_signups_user_id_fkey (
           id, name, username, school, grade
         )
@@ -412,6 +412,14 @@ export async function signupForEvent(params: {
   return { signup: data, isWaitlisted };
 }
 
+/** Hours credited for an event: the explicit hours_value, else the duration. */
+function resolveEventHours(event: { hours_value?: number | null; start_time: string; end_time: string }): number {
+  if (event.hours_value != null) return Number(event.hours_value);
+  const start = new Date(event.start_time).getTime();
+  const end = new Date(event.end_time).getTime();
+  return Math.round(((end - start) / (1000 * 60 * 60)) * 10) / 10;
+}
+
 // ── Check in a volunteer ──────────────────────────────────────────────────────
 
 export async function checkInVolunteer(params: {
@@ -429,6 +437,86 @@ export async function checkInVolunteer(params: {
 
   if (error) throw error;
   return { checkedIn: true };
+}
+
+// ── Confirm a single volunteer attended + auto-log their hours ─────────────────
+// One-click "yes, this person actually came" from the org event page. Marks the
+// signup checked-in and immediately credits the event's hours to that student as
+// a verified session. Idempotent: a second confirm (or a later bulk Complete)
+// won't double-log, thanks to the hours_logged_at marker.
+
+export async function confirmAttendance(params: {
+  eventId: string;
+  orgId: string;
+  userId: string;
+  confirmedBy: string;
+}) {
+  const { eventId, orgId, userId, confirmedBy } = params;
+
+  const { data: event } = await supabaseAdmin
+    .from('org_events')
+    .select('id, org_id, title, start_time, end_time, hours_value, organizations!org_events_org_id_fkey(name)')
+    .eq('id', eventId)
+    .eq('org_id', orgId)
+    .single();
+
+  if (!event) throw new NotFoundError('Event');
+
+  const { data: signup } = await supabaseAdmin
+    .from('event_signups')
+    .select('id, hours_logged_at')
+    .eq('event_id', eventId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!signup) throw new NotFoundError('Signup');
+
+  const now = new Date().toISOString();
+
+  // Always mark them checked in.
+  await supabaseAdmin
+    .from('event_signups')
+    .update({ status: 'checked_in', checked_in_at: (signup as any).checked_in_at ?? now })
+    .eq('id', (signup as any).id);
+
+  // Already logged → idempotent no-op for the hours.
+  if ((signup as any).hours_logged_at) {
+    return { confirmed: true, alreadyLogged: true, hours: 0 };
+  }
+
+  const hours = resolveEventHours(event as any);
+  const orgName = (event as any).organizations?.name ?? 'Organization';
+
+  const { error: sessionError } = await supabaseAdmin.from('sessions').insert({
+    user_id: userId,
+    org_id: orgId,
+    date: (event as any).start_time.split('T')[0],
+    hours,
+    activity: (event as any).title,
+    status: 'verified',
+    supervisor_name: orgName,
+    org_verified_by_user_id: confirmedBy,
+    org_verified_at: now,
+    self_reported: false,
+  });
+
+  if (sessionError) throw sessionError;
+
+  await supabaseAdmin
+    .from('event_signups')
+    .update({ hours_logged_at: now })
+    .eq('id', (signup as any).id);
+
+  await createNotification({
+    userId,
+    type: 'event',
+    title: `${hours} ${hours === 1 ? 'hour' : 'hours'} added 🎉`,
+    body: `${orgName} confirmed your attendance at ${(event as any).title}. Your hours are verified.`,
+    actionUrl: `/hours`,
+  });
+
+  logger.info({ eventId, userId, hours }, 'attendance_confirmed');
+  return { confirmed: true, alreadyLogged: false, hours };
 }
 
 // ── Mark no-show ──────────────────────────────────────────────────────────────
@@ -466,23 +554,22 @@ export async function completeEvent(eventId: string, orgId: string) {
     return { completed: true, sessionsCreated: 0 };
   }
 
+  // Only checked-in volunteers who haven't already had hours logged (via a
+  // one-by-one confirm). hours_logged_at NULL = not yet credited.
   const { data: checkins } = await supabaseAdmin
     .from('event_signups')
-    .select('user_id')
+    .select('id, user_id')
     .eq('event_id', eventId)
-    .eq('status', 'checked_in');
+    .eq('status', 'checked_in')
+    .is('hours_logged_at', null);
 
   if (!checkins?.length) {
     return { completed: true, sessionsCreated: 0 };
   }
 
-  const start = new Date(event.start_time);
-  const end = new Date(event.end_time);
-  const hours =
-    event.hours_value ??
-    Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60) * 10) / 10;
-
+  const hours = resolveEventHours(event as any);
   const orgName = (event as any).organizations?.name ?? 'Organization';
+  const now = new Date().toISOString();
 
   let sessionsCreated = 0;
   for (const checkin of checkins) {
@@ -496,10 +583,22 @@ export async function completeEvent(eventId: string, orgId: string) {
         status: 'verified',
         supervisor_name: orgName,
         org_verified_by_user_id: event.created_by,
-        org_verified_at: new Date().toISOString(),
+        org_verified_at: now,
         self_reported: false,
       });
-      if (!error) sessionsCreated++;
+      if (error) continue;
+      sessionsCreated++;
+      await supabaseAdmin
+        .from('event_signups')
+        .update({ hours_logged_at: now })
+        .eq('id', (checkin as any).id);
+      await createNotification({
+        userId: checkin.user_id,
+        type: 'event',
+        title: `${hours} ${hours === 1 ? 'hour' : 'hours'} added 🎉`,
+        body: `${orgName} confirmed your attendance at ${event.title}. Your hours are verified.`,
+        actionUrl: `/hours`,
+      });
     } catch (err) {
       logger.warn({ userId: checkin.user_id, eventId }, 'session_create_failed');
     }
@@ -507,4 +606,54 @@ export async function completeEvent(eventId: string, orgId: string) {
 
   logger.info({ eventId, sessionsCreated }, 'event_completed');
   return { completed: true, sessionsCreated };
+}
+
+// ── Student-facing: my upcoming/active events (for the dashboard card) ─────────
+// Events the student has signed up for (or is waitlisted on) that haven't ended
+// yet, soonest first. Powers the "Upcoming event" card at the top of the
+// student dashboard.
+
+export async function getMyUpcomingEvents(userId: string, limit = 5) {
+  const { data: signups } = await supabaseAdmin
+    .from('event_signups')
+    .select(`
+      status, signed_up_at,
+      org_events!event_signups_event_id_fkey (
+        id, title, description, location, location_url, program,
+        start_time, end_time, max_volunteers, hours_value, status, org_id,
+        organizations!org_events_org_id_fkey (name, slug)
+      )
+    `)
+    .eq('user_id', userId)
+    .in('status', ['signed_up', 'waitlisted', 'checked_in']);
+
+  const nowMs = Date.now();
+  const rows = (signups ?? [])
+    .map((s: any) => ({ signup: s, event: s.org_events }))
+    .filter(({ event }) =>
+      event &&
+      event.status !== 'cancelled' &&
+      new Date(event.end_time).getTime() >= nowMs,
+    )
+    .sort((a, b) =>
+      new Date(a.event.start_time).getTime() - new Date(b.event.start_time).getTime(),
+    )
+    .slice(0, limit);
+
+  return rows.map(({ signup, event }) => ({
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    location: event.location,
+    locationUrl: event.location_url,
+    program: event.program,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    maxVolunteers: event.max_volunteers,
+    hoursValue: event.hours_value,
+    orgId: event.org_id,
+    orgName: event.organizations?.name ?? 'Organization',
+    orgSlug: event.organizations?.slug ?? null,
+    myStatus: signup.status,
+  }));
 }

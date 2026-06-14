@@ -172,6 +172,25 @@ router.post('/:orgId/events/:eventId/checkin/:userId', requireAuth, async (req: 
   }
 });
 
+// POST /org/:orgId/events/:eventId/confirm/:userId
+// Confirm one volunteer attended + auto-log their hours immediately.
+router.post('/:orgId/events/:eventId/confirm/:userId', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
+  try {
+    await requireOrgAdmin(req.params.orgId as string, req.user!.id);
+    const result = await eventsService.confirmAttendance({
+      eventId: req.params.eventId as string,
+      orgId: req.params.orgId as string,
+      userId: req.params.userId as string,
+      confirmedBy: req.user!.id,
+    });
+    return res.json({ data: result });
+  } catch (err: any) {
+    if (handleNotAdmin(err, res)) return;
+    logger.error(err, 'confirm_attendance_error');
+    return res.status(500).json({ error: 'Failed to confirm attendance' });
+  }
+});
+
 // POST /org/:orgId/events/:eventId/complete
 router.post('/:orgId/events/:eventId/complete', requireAuth, async (req: Request, res: Response, _next: NextFunction) => {
   try {
