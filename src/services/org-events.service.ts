@@ -152,7 +152,11 @@ export async function getEventDetail(eventId: string) {
   const signups: any[] = event.event_signups ?? [];
   return {
     ...event,
-    signups: {
+    // The detail page expects a FLAT array here and does its own grouping —
+    // keep this an array. Grouped buckets are exposed separately for any
+    // consumer that wants them.
+    signups,
+    signupGroups: {
       confirmed:  signups.filter((s) => s.status === 'signed_up'),
       waitlisted: signups.filter((s) => s.status === 'waitlisted'),
       checkedIn:  signups.filter((s) => s.status === 'checked_in'),
