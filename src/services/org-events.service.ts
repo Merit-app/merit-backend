@@ -259,6 +259,25 @@ export async function publishEvent(eventId: string, orgId: string) {
     notified = reached.size;
   }
 
+  // Confirmation copy for the org's admins/coordinators — in-app only (no point
+  // texting/emailing them about their own event). Skip any admin already in the
+  // volunteer audience so they don't get two notifications.
+  const { data: adminRows } = await supabaseAdmin
+    .from('org_admins')
+    .select('user_id')
+    .eq('org_id', orgId);
+  const audienceSet = new Set(audienceIds);
+  const adminIds = [...new Set<string>((adminRows ?? []).map((r: any) => r.user_id))]
+    .filter((id) => !audienceSet.has(id));
+  if (adminIds.length) {
+    await createManyNotifications(adminIds, {
+      type: 'event',
+      title: `Event published: ${event.title}`,
+      body: `${startDate} at ${startTime} · ${notified} ${notified === 1 ? 'person' : 'people'} notified. Tap to manage.`,
+      actionUrl: `/org/${orgId}/events/${eventId}`,
+    });
+  }
+
   logger.info({ eventId, notified }, 'event_published');
   return { event, notified };
 }
