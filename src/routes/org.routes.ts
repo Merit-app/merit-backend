@@ -69,6 +69,7 @@ router.post('/:orgId/events', requireAuth, requireOrgPlan('pro'), async (req: Re
       maxVolunteers: z.number().int().positive().optional(),
       hoursValue: z.number().positive().optional(),
       autoLogHours: z.boolean().default(true),
+      timezone: z.string().max(64).optional(),
     });
 
     const body = schema.parse(req.body);
@@ -104,6 +105,7 @@ router.patch('/:orgId/events/:eventId', requireAuth, requireOrgPlan('pro'), asyn
       maxVolunteers: z.number().int().positive().optional(),
       hoursValue: z.number().positive().optional(),
       autoLogHours: z.boolean().optional(),
+      timezone: z.string().max(64).optional(),
     });
 
     const body = schema.parse(req.body);

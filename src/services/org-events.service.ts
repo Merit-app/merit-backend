@@ -8,6 +8,15 @@ import { NotFoundError } from '../lib/errors';
 
 const APP_URL = env.FRONTEND_URL ?? 'https://meritco.app';
 
+// Fallback zone for legacy events created before we captured the organizer's tz.
+const DEFAULT_TZ = 'America/Toronto';
+
+/** Format a UTC ISO timestamp in the event's own timezone (so the wall-clock
+ *  time shown in emails/SMS matches what the organizer entered). */
+function fmtInTz(iso: string, tz: string | null | undefined, opts: Intl.DateTimeFormatOptions): string {
+  return new Date(iso).toLocaleString('en-CA', { timeZone: tz || DEFAULT_TZ, ...opts });
+}
+
 // ── List events for an org ────────────────────────────────────────────────────
 
 export async function listOrgEvents(params: {
@@ -61,6 +70,7 @@ export async function createOrgEvent(params: {
   minVolunteers?: number;
   hoursValue?: number;
   autoLogHours?: boolean;
+  timezone?: string;
 }) {
   const { data, error } = await supabaseAdmin
     .from('org_events')
@@ -78,6 +88,7 @@ export async function createOrgEvent(params: {
       min_volunteers: params.minVolunteers ?? 1,
       hours_value: params.hoursValue,
       auto_log_hours: params.autoLogHours ?? true,
+      timezone: params.timezone,
       status: 'draft',
     })
     .select()
@@ -102,8 +113,10 @@ export async function updateOrgEvent(params: {
   maxVolunteers?: number;
   hoursValue?: number;
   autoLogHours?: boolean;
+  timezone?: string;
 }) {
   const patch: Record<string, unknown> = {};
+  if (params.timezone !== undefined) patch.timezone = params.timezone;
   if (params.title !== undefined) patch.title = params.title;
   if (params.description !== undefined) patch.description = params.description;
   if (params.location !== undefined) patch.location = params.location;
@@ -208,10 +221,11 @@ export async function publishEvent(eventId: string, orgId: string) {
   ])];
 
   const orgName = (event as any).organizations?.name ?? 'Your organization';
-  const startDate = new Date(event.start_time).toLocaleDateString('en-CA', {
+  const tz = (event as any).timezone as string | null;
+  const startDate = fmtInTz(event.start_time, tz, {
     weekday: 'short', month: 'short', day: 'numeric',
   });
-  const startTime = new Date(event.start_time).toLocaleTimeString('en-CA', {
+  const startTime = fmtInTz(event.start_time, tz, {
     hour: 'numeric', minute: '2-digit',
   });
   const eventUrl = `${APP_URL}/events/${eventId}`;
@@ -315,7 +329,7 @@ export async function getStudentEvent(eventId: string, userId?: string) {
     .from('org_events')
     .select(`
       id, title, description, location, location_url, program,
-      start_time, end_time, max_volunteers, status, hours_value, org_id,
+      start_time, end_time, max_volunteers, status, hours_value, org_id, timezone,
       organizations!org_events_org_id_fkey (name, slug),
       event_signups(count)
     `)
@@ -345,6 +359,7 @@ export async function getStudentEvent(eventId: string, userId?: string) {
     program: event.program,
     startTime: event.start_time,
     endTime: event.end_time,
+    timezone: (event as any).timezone ?? null,
     maxVolunteers: event.max_volunteers,
     hoursValue: event.hours_value,
     status: event.status,
@@ -367,7 +382,7 @@ export async function signupForEvent(params: {
 
   const { data: event } = await supabaseAdmin
     .from('org_events')
-    .select('id, max_volunteers, status, title, start_time, org_id')
+    .select('id, max_volunteers, status, title, start_time, org_id, timezone')
     .eq('id', eventId)
     .single();
 
@@ -396,7 +411,7 @@ export async function signupForEvent(params: {
   if (error) throw error;
 
   // Confirmation notification for the student's inbox.
-  const startDate = new Date(event.start_time).toLocaleDateString('en-CA', {
+  const startDate = fmtInTz(event.start_time, (event as any).timezone, {
     weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   });
   await createNotification({
@@ -614,46 +629,58 @@ export async function completeEvent(eventId: string, orgId: string) {
 // student dashboard.
 
 export async function getMyUpcomingEvents(userId: string, limit = 5) {
-  const { data: signups } = await supabaseAdmin
+  // Two plain queries instead of a nested embed — embeds fail silently if a FK
+  // hint is off, which would leave the dashboard card mysteriously empty.
+  const { data: signups, error: signupErr } = await supabaseAdmin
     .from('event_signups')
-    .select(`
-      status, signed_up_at,
-      org_events!event_signups_event_id_fkey (
-        id, title, description, location, location_url, program,
-        start_time, end_time, max_volunteers, hours_value, status, org_id,
-        organizations!org_events_org_id_fkey (name, slug)
-      )
-    `)
+    .select('event_id, status')
     .eq('user_id', userId)
     .in('status', ['signed_up', 'waitlisted', 'checked_in']);
 
-  const nowMs = Date.now();
-  const rows = (signups ?? [])
-    .map((s: any) => ({ signup: s, event: s.org_events as any }))
-    .filter((r: { signup: any; event: any }) =>
-      r.event &&
-      r.event.status !== 'cancelled' &&
-      new Date(r.event.end_time).getTime() >= nowMs,
-    )
-    .sort((a: { event: any }, b: { event: any }) =>
-      new Date(a.event.start_time).getTime() - new Date(b.event.start_time).getTime(),
-    )
-    .slice(0, limit);
+  if (signupErr) {
+    logger.error({ err: signupErr, userId }, 'my_upcoming_signups_failed');
+    return [];
+  }
+  if (!signups?.length) return [];
 
-  return rows.map(({ signup, event }: { signup: any; event: any }) => ({
-    id: event.id,
-    title: event.title,
-    description: event.description,
-    location: event.location,
-    locationUrl: event.location_url,
-    program: event.program,
-    startTime: event.start_time,
-    endTime: event.end_time,
-    maxVolunteers: event.max_volunteers,
-    hoursValue: event.hours_value,
-    orgId: event.org_id,
-    orgName: event.organizations?.name ?? 'Organization',
-    orgSlug: event.organizations?.slug ?? null,
-    myStatus: signup.status,
-  }));
+  const statusByEvent = new Map<string, string>();
+  for (const s of signups as any[]) statusByEvent.set(s.event_id, s.status);
+  const eventIds = [...statusByEvent.keys()];
+
+  const { data: events, error: eventErr } = await supabaseAdmin
+    .from('org_events')
+    .select(`
+      id, title, description, location, location_url, program,
+      start_time, end_time, max_volunteers, hours_value, status, org_id, timezone,
+      organizations!org_events_org_id_fkey (name, slug)
+    `)
+    .in('id', eventIds);
+
+  if (eventErr) {
+    logger.error({ err: eventErr, userId }, 'my_upcoming_events_failed');
+    return [];
+  }
+
+  const nowMs = Date.now();
+  return (events ?? [])
+    .filter((e: any) => e.status !== 'cancelled' && new Date(e.end_time).getTime() >= nowMs)
+    .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+    .slice(0, limit)
+    .map((e: any) => ({
+      id: e.id,
+      title: e.title,
+      description: e.description,
+      location: e.location,
+      locationUrl: e.location_url,
+      program: e.program,
+      startTime: e.start_time,
+      endTime: e.end_time,
+      timezone: e.timezone ?? null,
+      maxVolunteers: e.max_volunteers,
+      hoursValue: e.hours_value,
+      orgId: e.org_id,
+      orgName: e.organizations?.name ?? 'Organization',
+      orgSlug: e.organizations?.slug ?? null,
+      myStatus: statusByEvent.get(e.id),
+    }));
 }
