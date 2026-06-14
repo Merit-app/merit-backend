@@ -1,6 +1,9 @@
 import { supabaseAdmin } from '../config/supabase';
 import { NotFoundError } from '../lib/errors';
 
+// NOTE: the notifications table tracks read state via a nullable `read_at`
+// timestamp (NULL = unread), NOT a boolean `read` column. The API still exposes
+// a boolean `read` to clients — we derive it from `read_at` on the way out.
 interface NotificationRow {
   id: string;
   user_id: string;
@@ -8,8 +11,12 @@ interface NotificationRow {
   title: string;
   body: string;
   action_url: string | null;
-  read: boolean;
+  read_at: string | null;
   created_at: string;
+}
+
+function shape(row: NotificationRow) {
+  return { ...row, read: row.read_at != null };
 }
 
 export async function getNotifications(
@@ -22,7 +29,7 @@ export async function getNotifications(
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
 
-  if (opts.unreadOnly) query = query.eq('read', false);
+  if (opts.unreadOnly) query = query.is('read_at', null);
 
   const from = (opts.page - 1) * opts.perPage;
   const to = from + opts.perPage - 1;
@@ -32,7 +39,7 @@ export async function getNotifications(
   const total = count ?? 0;
 
   return {
-    notifications: (data as NotificationRow[] | null) ?? [],
+    notifications: ((data as NotificationRow[] | null) ?? []).map(shape),
     meta: { total, page: opts.page, perPage: opts.perPage, hasMore: total > to + 1 },
   };
 }
@@ -42,7 +49,7 @@ export async function getUnreadCount(userId: string): Promise<number> {
     .from('notifications')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', userId)
-    .eq('read', false);
+    .is('read_at', null);
 
   return count ?? 0;
 }
@@ -59,17 +66,18 @@ export async function markRead(notificationId: string, userId: string): Promise<
 
   await supabaseAdmin
     .from('notifications')
-    .update({ read: true })
+    .update({ read_at: new Date().toISOString() })
     .eq('id', notificationId)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .is('read_at', null);
 }
 
 export async function markAllRead(userId: string): Promise<void> {
   await supabaseAdmin
     .from('notifications')
-    .update({ read: true })
+    .update({ read_at: new Date().toISOString() })
     .eq('user_id', userId)
-    .eq('read', false);
+    .is('read_at', null);
 }
 
 export async function deleteNotification(notificationId: string, userId: string): Promise<void> {
@@ -94,7 +102,7 @@ export async function deleteAllRead(userId: string): Promise<void> {
     .from('notifications')
     .delete()
     .eq('user_id', userId)
-    .eq('read', true);
+    .not('read_at', 'is', null);
 }
 
 // ─── Creation helpers ───────────────────────────────────────────────────────
@@ -116,7 +124,6 @@ export async function createNotification(n: NewNotification): Promise<void> {
       title: n.title,
       body: n.body,
       action_url: n.actionUrl ?? null,
-      read: false,
     });
   } catch {
     /* non-fatal */
@@ -135,7 +142,6 @@ export async function createManyNotifications(
     title: payload.title,
     body: payload.body,
     action_url: payload.actionUrl ?? null,
-    read: false,
   }));
   const { error } = await supabaseAdmin.from('notifications').insert(rows);
   if (error) return 0;
