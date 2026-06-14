@@ -690,7 +690,9 @@ export async function getMyUpcomingEvents(userId: string, limit = 5) {
 
   const nowMs = Date.now();
   return (events ?? [])
-    .filter((e: any) => e.status !== 'cancelled' && new Date(e.end_time).getTime() >= nowMs)
+    // Only events still open and not yet ended count as "upcoming" — exclude
+    // draft / cancelled / completed.
+    .filter((e: any) => e.status === 'published' && new Date(e.end_time).getTime() >= nowMs)
     .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
     .slice(0, limit)
     .map((e: any) => ({
