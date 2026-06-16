@@ -289,8 +289,16 @@ export async function generateVolunteerCertificate(params: {
   orgId: string;
   userId: string;
   coordinatorName: string;
+  coordinatorTitle?: string;
+  certTitle?: string;
+  customMessage?: string;
 }) {
   const { orgId, userId, coordinatorName } = params;
+  // Customizable fields — fall back to sensible defaults when the org leaves
+  // them blank so the certificate always reads cleanly.
+  const certTitle = params.certTitle?.trim() || 'Certificate of Recognition';
+  const coordinatorTitle = params.coordinatorTitle?.trim() || 'Volunteer Coordinator';
+  const customMessage = params.customMessage?.trim() || '';
 
   const [orgResult, userResult, sessionsResult] = await Promise.all([
     supabaseAdmin
@@ -350,6 +358,11 @@ export async function generateVolunteerCertificate(params: {
       fontSize: 11, color: '#333', textAlign: 'center',
       lineHeight: 1.6, maxWidth: 380, marginBottom: 8,
     },
+    customMessage: {
+      fontSize: 11, color: '#444', textAlign: 'center',
+      lineHeight: 1.6, maxWidth: 400, marginTop: 8,
+      fontFamily: 'Helvetica-Oblique',
+    },
     hoursBox: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: '12 24', marginVertical: 20 },
     hoursText: { fontSize: 36, fontFamily: 'Helvetica-Bold', color: '#fff', textAlign: 'center' },
     hoursLabel: { fontSize: 10, color: '#ccc', textAlign: 'center', letterSpacing: 2 },
@@ -391,7 +404,7 @@ export async function generateVolunteerCertificate(params: {
             React.createElement(
               Text,
               { style: styles.certTitle },
-              'Certificate of Recognition',
+              certTitle,
             ),
             React.createElement(
               Text,
@@ -438,6 +451,13 @@ export async function generateVolunteerCertificate(params: {
                   `Activities: ${activities}`,
                 )
               : null,
+            customMessage
+              ? React.createElement(
+                  Text,
+                  { style: styles.customMessage },
+                  customMessage,
+                )
+              : null,
             React.createElement(
               View,
               { style: styles.sigRow },
@@ -453,7 +473,7 @@ export async function generateVolunteerCertificate(params: {
                 React.createElement(
                   Text,
                   { style: styles.sigLabel },
-                  'Coordinator Signature',
+                  coordinatorTitle,
                 ),
               ),
               React.createElement(

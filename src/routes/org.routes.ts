@@ -322,13 +322,19 @@ router.post('/:orgId/certificates', requireAuth, requireOrgPlan('pro'), async (r
     const schema = z.object({
       userId: z.string().uuid(),
       coordinatorName: z.string().min(2).max(100),
+      coordinatorTitle: z.string().max(100).optional(),
+      certTitle: z.string().max(120).optional(),
+      customMessage: z.string().max(600).optional(),
     });
-    const { userId, coordinatorName } = schema.parse(req.body);
+    const { userId, coordinatorName, coordinatorTitle, certTitle, customMessage } = schema.parse(req.body);
 
     const pdfBuffer = await reportsService.generateVolunteerCertificate({
       orgId: req.params.orgId as string,
       userId,
       coordinatorName,
+      coordinatorTitle,
+      certTitle,
+      customMessage,
     });
 
     res.setHeader('Content-Type', 'application/pdf');
