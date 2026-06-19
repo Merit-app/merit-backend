@@ -79,7 +79,13 @@ router.get('/organizations/:orgId/volunteers', requireAuth, async (req: Request,
   try {
     if (req.query.debug === '1') {
       const dbg = await orgsService._debugOrgVolunteers(req.params.orgId as string);
-      return res.json(success({ debug: dbg }));
+      const real = await orgsService.getOrgVolunteers(req.params.orgId as string, req.user!.id);
+      return res.json(success({
+        version: 'DBG3',
+        debug: dbg,
+        realLen: Array.isArray(real) ? real.length : 'notarray',
+        realSample: (Array.isArray(real) ? real : []).map((v: any) => ({ n: v.student && v.student.name, vh: v.verifiedHours, int: !!v.isInterested })),
+      }));
     }
     const volunteers = await orgsService.getOrgVolunteers(req.params.orgId as string, req.user!.id);
     res.json(success({ volunteers }));

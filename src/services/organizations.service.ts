@@ -583,6 +583,7 @@ async function requireOrgAdmin(orgId: string, userId: string): Promise<string> {
 
 export async function getOrgVolunteers(orgId: string, userId: string) {
   await requireOrgAdmin(orgId, userId);
+  logger.info({ orgId, build: 'volunteers-noembed-v3' }, 'org_volunteers_start');
 
   const { data: sessions, error: sessErr } = await supabaseAdmin
     .from('sessions')
