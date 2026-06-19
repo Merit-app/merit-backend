@@ -584,12 +584,28 @@ async function requireOrgAdmin(orgId: string, userId: string): Promise<string> {
 export async function getOrgVolunteers(orgId: string, userId: string) {
   await requireOrgAdmin(orgId, userId);
 
-  const { data: sessions } = await supabaseAdmin
+  const { data: sessions, error: sessErr } = await supabaseAdmin
     .from('sessions')
-    .select('id, date, hours, status, activity, user_id, users!user_id(id, name, email, phone, school, grade, username, avatar_url)')
+    .select('id, date, hours, status, activity, user_id')
     .eq('org_id', orgId)
     .is('deleted_at', null)
     .order('date', { ascending: false });
+  if (sessErr) logger.warn({ sessErr, orgId }, 'org_volunteers_sessions_query_failed');
+
+  // Fetch student details in ONE plain query rather than an embedded join.
+  // Embedding users(...) on sessions is ambiguous — sessions has two FKs to
+  // users (user_id + org_verified_by_user_id) — and PostgREST returns null,
+  // which silently dropped every session-based volunteer.
+  const sessionUserIds = [...new Set((sessions ?? []).map((s: any) => s.user_id).filter(Boolean))];
+  const userById = new Map<string, any>();
+  if (sessionUserIds.length) {
+    const { data: sUsers, error: suErr } = await supabaseAdmin
+      .from('users')
+      .select('id, name, email, phone, school, grade, username, avatar_url')
+      .in('id', sessionUserIds);
+    if (suErr) logger.warn({ suErr, orgId }, 'org_volunteers_session_users_failed');
+    for (const u of sUsers ?? []) userById.set(u.id, u);
+  }
 
   // Group by student
   const studentMap = new Map<string, {
@@ -601,7 +617,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   }>();
 
   for (const s of sessions ?? []) {
-    const user = (s as any).users;
+    const user = userById.get((s as any).user_id);
     if (!user?.id) continue;
     const existing = studentMap.get(user.id);
     if (existing) {
