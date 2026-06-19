@@ -317,7 +317,7 @@ export async function getOrgDashboard(orgId: string, userId: string) {
     supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
     supabaseAdmin
       .from('sessions')
-      .select('id, date, hours, status, activity, user_id, users(id, name, school, grade)')
+      .select('id, date, hours, status, activity, user_id, users!user_id(id, name, school, grade)')
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('date', { ascending: false })
@@ -586,7 +586,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
-    .select('id, date, hours, status, activity, user_id, users(id, name, email, phone, school, grade, username, avatar_url)')
+    .select('id, date, hours, status, activity, user_id, users!user_id(id, name, email, phone, school, grade, username, avatar_url)')
     .eq('org_id', orgId)
     .is('deleted_at', null)
     .order('date', { ascending: false });

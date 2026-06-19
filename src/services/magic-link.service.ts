@@ -18,7 +18,7 @@ export async function sendSupervisorMagicLink(supervisorEmail: string) {
   // Find all recent unverified sessions for this supervisor
   const { data: verifications } = await supabaseAdmin
     .from('verifications')
-    .select('id, session:sessions(id, user_id, hours, date, status, org:organizations(name), user:users(name))')
+    .select('id, session:sessions(id, user_id, hours, date, status, org:organizations(name), user:users!user_id(name))')
     .eq('destination', supervisorEmail.toLowerCase())
     .eq('channel', 'email')
     .is('responded_at', null)
@@ -53,7 +53,7 @@ export async function sendSupervisorMagicLink(supervisorEmail: string) {
 export async function verifySupervisorToken(token: string, response: 'YES' | 'NO' | 'STOP') {
   const { data: verification } = await supabaseAdmin
     .from('verifications')
-    .select('*, session:sessions(*, org:organizations(name), user:users(name), authenticator:authenticators(*))')
+    .select('*, session:sessions(*, org:organizations(name), user:users!user_id(name), authenticator:authenticators(*))')
     .eq('confirmation_token', token)
     .maybeSingle();
 
