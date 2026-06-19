@@ -112,6 +112,36 @@ router.post('/organizations/:orgId/sessions/:sessionId/dispute', requireAuth, as
   }
 });
 
+// ─── POST /organizations/:orgId/volunteers/:userId/adjust-hours ───────────────
+// Org admin manually adds (positive) or subtracts (negative) verified hours for
+// a volunteer. Writes one verified session under the org — shows on both sides.
+router.post(
+  '/organizations/:orgId/volunteers/:userId/adjust-hours',
+  requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const schema = z.object({
+        hours: z
+          .number({ invalid_type_error: 'Hours must be a number' })
+          .refine((n) => Number.isFinite(n) && n !== 0, 'Enter a non-zero number of hours')
+          .refine((n) => Math.abs(n) <= 1000, 'Hours must be between -1000 and 1000'),
+        reason: z.string().max(200).optional(),
+      });
+      const body = schema.parse(req.body);
+      const result = await orgsService.adjustVolunteerHours(
+        req.params.orgId as string,
+        req.user!.id,
+        req.params.userId as string,
+        body.hours,
+        body.reason,
+      );
+      res.status(201).json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // ─── POST /organizations/:orgId/team/invite ───────────────────────────────────
 router.post('/organizations/:orgId/team/invite', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {

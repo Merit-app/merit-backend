@@ -701,6 +701,59 @@ export async function disputeSessionAsOrg(orgId: string, sessionId: string, user
   return { disputed: true };
 }
 
+// ─── Manual hour adjustment (org-side) ────────────────────────────────────────
+
+/**
+ * Lets an org admin add or subtract verified hours for a volunteer by writing a
+ * single verified session under this org. Because every total (org dashboard +
+ * student dashboard) is a sum of verified session hours, this one ledger row is
+ * the single source of truth and shows up on both sides automatically.
+ * `hours` may be negative to subtract. Validated at the route.
+ */
+export async function adjustVolunteerHours(
+  orgId: string,
+  adminUserId: string,
+  targetUserId: string,
+  hours: number,
+  reason?: string,
+) {
+  await requireOrgAdmin(orgId, adminUserId);
+
+  const rounded = Math.round(hours * 100) / 100;
+  const now = new Date().toISOString();
+
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
+    .select('name')
+    .eq('id', orgId)
+    .single();
+  const orgName = (org as any)?.name ?? 'Organization';
+
+  const label =
+    reason?.trim().slice(0, 200) ||
+    (rounded >= 0 ? 'Hours added by organization' : 'Hours adjusted by organization');
+
+  const { data: session, error } = await supabaseAdmin
+    .from('sessions')
+    .insert({
+      user_id: targetUserId,
+      org_id: orgId,
+      date: now.split('T')[0],
+      hours: rounded,
+      activity: label,
+      status: 'verified',
+      supervisor_name: orgName,
+      org_verified_by_user_id: adminUserId,
+      org_verified_at: now,
+      self_reported: false,
+    })
+    .select('id, date, hours, activity, status')
+    .single();
+
+  if (error) throw error;
+  return { adjusted: true, session };
+}
+
 // ─── Team management ──────────────────────────────────────────────────────────
 
 export async function inviteTeamMember(
