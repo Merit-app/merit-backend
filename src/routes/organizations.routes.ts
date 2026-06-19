@@ -77,6 +77,10 @@ router.get('/organizations/admin/mine', requireAuth, async (req: Request, res: R
 // ─── GET /organizations/:orgId/volunteers ─────────────────────────────────────
 router.get('/organizations/:orgId/volunteers', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.query.debug === '1') {
+      const dbg = await orgsService._debugOrgVolunteers(req.params.orgId as string);
+      return res.json(success({ debug: dbg }));
+    }
     const volunteers = await orgsService.getOrgVolunteers(req.params.orgId as string, req.user!.id);
     res.json(success({ volunteers }));
   } catch (err) {

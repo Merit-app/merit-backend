@@ -689,6 +689,36 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   return [...sessionVolunteers, ...interestOnly];
 }
 
+// TEMP DEBUG — remove after diagnosing volunteer-hours discrepancy
+export async function _debugOrgVolunteers(orgId: string) {
+  const { data: sessions, error: sessErr } = await supabaseAdmin
+    .from('sessions')
+    .select('id, date, hours, status, activity, user_id')
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .order('date', { ascending: false });
+  const ids = [...new Set((sessions ?? []).map((s: any) => s.user_id).filter(Boolean))];
+  let usersFetched = 0;
+  let uErr: string | null = null;
+  if (ids.length) {
+    const { data: us, error } = await supabaseAdmin
+      .from('users')
+      .select('id, name')
+      .in('id', ids as string[]);
+    usersFetched = (us ?? []).length;
+    uErr = (error as any)?.message ?? null;
+  }
+  return {
+    orgId,
+    rawSessions: (sessions ?? []).length,
+    sessErr: (sessErr as any)?.message ?? null,
+    userIds: ids,
+    usersFetched,
+    uErr,
+    sampleSession: (sessions ?? [])[0] ?? null,
+  };
+}
+
 // ─── Verify / dispute session as org ─────────────────────────────────────────
 
 export async function verifySessionAsOrg(orgId: string, sessionId: string, userId: string) {
