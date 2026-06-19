@@ -640,6 +640,15 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   const sessionVolunteers = Array.from(studentMap.values())
     .sort((a, b) => b.verifiedHours - a.verifiedHours);
 
+  const _dbg = {
+    rawSessions: (sessions ?? []).length,
+    sessErr: (sessErr as any)?.message ?? null,
+    usersFetched: userById.size,
+    studentMapSize: studentMap.size,
+    firstUserId: (sessions ?? [])[0] ? (sessions as any)[0].user_id : null,
+    firstUserHit: (sessions ?? [])[0] ? !!userById.get((sessions as any)[0].user_id) : null,
+  };
+
   // Append students who registered interest but have no sessions yet.
   // Fetch interests and their users in TWO plain queries — no embedded join,
   // which was returning null and silently dropping interested volunteers.
@@ -650,14 +659,14 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   if (interestErr) {
     logger.warn({ interestErr, orgId }, 'org_volunteers_interest_query_failed');
-    return sessionVolunteers;
+    return Object.assign(sessionVolunteers, { _dbg });
   }
 
   const interestIds = (interests ?? [])
     .map((i: any) => i.user_id as string)
     .filter((id: string) => id && !studentMap.has(id));
 
-  if (interestIds.length === 0) return sessionVolunteers;
+  if (interestIds.length === 0) return Object.assign(sessionVolunteers, { _dbg });
 
   const createdAtById = new Map<string, string>();
   for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
@@ -687,7 +696,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     isInterested: true,
   }));
 
-  return [...sessionVolunteers, ...interestOnly];
+  return Object.assign([...sessionVolunteers, ...interestOnly], { _dbg });
 }
 
 // TEMP DEBUG — remove after diagnosing volunteer-hours discrepancy
