@@ -122,7 +122,7 @@ router.post(
     try {
       const schema = z.object({
         hours: z
-          .number({ invalid_type_error: 'Hours must be a number' })
+          .number()
           .refine((n) => Number.isFinite(n) && n !== 0, 'Enter a non-zero number of hours')
           .refine((n) => Math.abs(n) <= 1000, 'Hours must be between -1000 and 1000'),
         reason: z.string().max(200).optional(),
