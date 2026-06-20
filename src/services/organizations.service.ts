@@ -157,7 +157,7 @@ export async function resolveOrCreateOrg(input: {
   const remote = await propublica.searchNonprofits(input.newOrg.name, 1);
   const match = remote[0];
 
-  const { data: inserted } = await supabaseAdmin
+  const { data: inserted, error: insertErr } = await supabaseAdmin
     .from('organizations')
     .insert({
       name: match?.name ?? input.newOrg.name,
@@ -170,7 +170,14 @@ export async function resolveOrCreateOrg(input: {
     .select('id')
     .single();
 
-  return inserted!.id;
+  // Don't `inserted!.id` blind — a silent insert failure would throw an opaque
+  // "Cannot read properties of null" 500. Surface a real error instead.
+  if (insertErr || !inserted?.id) {
+    logger.error({ insertErr, name: input.newOrg.name }, 'resolve_org_insert_failed');
+    throw new AppError('org_resolve_failed', 'Could not resolve or create the organization.', 500);
+  }
+
+  return inserted.id;
 }
 
 /** Create a brand-new org and make the creator its owner/admin */
@@ -298,6 +305,55 @@ export async function getAdminOrgs(userId: string) {
   })).filter((o: any) => o.id);
 }
 
+/**
+ * Truncation-free org session aggregates. The dashboard used to compute every
+ * stat from a `.limit(100)` slice, so any org past 100 sessions under-reported
+ * its total hours, session counts and student count. We page through narrow
+ * columns (no 100-row cap) and aggregate in a single pass. Ordered by `id` so
+ * OFFSET pagination is deterministic across pages.
+ */
+async function computeOrgSessionStats(orgId: string) {
+  const PAGE = 1000;
+  const MAX_PAGES = 100; // ~100k-session safety ceiling — far beyond pilot scale
+  let totalSessions = 0;
+  let verifiedSessions = 0;
+  let pendingSessions = 0;
+  let totalHours = 0;
+  const studentIds = new Set<string>();
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const from = page * PAGE;
+    const { data, error } = await supabaseAdmin
+      .from('sessions')
+      .select('user_id, hours, status')
+      .eq('org_id', orgId)
+      .is('deleted_at', null)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+
+    if (error) {
+      logger.error({ error, orgId, page }, 'org_dashboard_stats_page_error');
+      break;
+    }
+
+    const rows = (data ?? []) as Array<{ user_id: string | null; hours: number | null; status: string }>;
+    for (const s of rows) {
+      totalSessions++;
+      if (s.user_id) studentIds.add(s.user_id);
+      if (s.status === 'verified') {
+        verifiedSessions++;
+        totalHours += Number(s.hours ?? 0);
+      } else if (s.status === 'pending') {
+        pendingSessions++;
+      }
+    }
+
+    if (rows.length < PAGE) break; // last page
+  }
+
+  return { totalSessions, verifiedSessions, pendingSessions, totalHours, studentIds };
+}
+
 /** Full dashboard data for an org, verified admin only */
 export async function getOrgDashboard(orgId: string, userId: string) {
   // Verify admin and pull onboarding state in one query
@@ -313,7 +369,10 @@ export async function getOrgDashboard(orgId: string, userId: string) {
 
   logger.info({ orgId, userId, role: adminRecord.role }, 'org_dashboard_query_start');
 
-  const [orgResult, sessionsResult, adminsResult] = await Promise.all([
+  // Stats come from a full-table scan (computeOrgSessionStats); the session list
+  // below is only the 20 rows we actually render, with the disambiguated user
+  // embed (sessions has two FKs to users, so the `!user_id` hint is required).
+  const [orgResult, recentResult, adminsResult, sessionStats] = await Promise.all([
     supabaseAdmin.from('organizations').select('*').eq('id', orgId).single(),
     supabaseAdmin
       .from('sessions')
@@ -321,28 +380,24 @@ export async function getOrgDashboard(orgId: string, userId: string) {
       .eq('org_id', orgId)
       .is('deleted_at', null)
       .order('date', { ascending: false })
-      .limit(100),
+      .limit(20),
     supabaseAdmin
       .from('org_admins')
       .select('role, user_id, users(id, name, email, avatar_url)')
       .eq('org_id', orgId),
+    computeOrgSessionStats(orgId),
   ]);
 
   if (orgResult.error) logger.error({ err: orgResult.error, orgId }, 'org_dashboard_org_query_error');
-  if (sessionsResult.error) logger.error({ err: sessionsResult.error, orgId }, 'org_dashboard_sessions_query_error');
+  if (recentResult.error) logger.error({ err: recentResult.error, orgId }, 'org_dashboard_sessions_query_error');
   if (adminsResult.error) logger.error({ err: adminsResult.error, orgId }, 'org_dashboard_admins_query_error');
 
   const org = orgResult.data;
-  const sessionList = sessionsResult.data ?? [];
+  const recentSessions = recentResult.data ?? [];
   const admins = adminsResult.data ?? [];
 
-  const verifiedList = sessionList.filter((s: any) => s.status === 'verified');
-  const totalHours = verifiedList.reduce((sum: number, s: any) => sum + (s.hours ?? 0), 0);
-  const sessionStudentIds = new Set(
-    sessionList.map((s: any) => s.user_id).filter(Boolean),
-  );
-
-  // Also count students who registered interest but have no sessions yet
+  // Also count students who registered interest but have no sessions yet.
+  // Compared against the FULL distinct-student set, not just the recent slice.
   let interestedOnlyCount = 0;
   try {
     const { data: interested } = await supabaseAdmin
@@ -350,25 +405,22 @@ export async function getOrgDashboard(orgId: string, userId: string) {
       .select('user_id')
       .eq('org_id', orgId);
     interestedOnlyCount = (interested ?? [])
-      .filter((i: any) => i.user_id && !sessionStudentIds.has(i.user_id))
+      .filter((i: any) => i.user_id && !sessionStats.studentIds.has(i.user_id))
       .length;
   } catch { /* table may not exist yet — silent */ }
 
-  const verifiedSessions = verifiedList.length;
-  const pendingSessions = sessionList.filter((s: any) => s.status === 'pending').length;
-
-  logger.info({ orgId, orgFound: !!org, sessions: sessionList.length, admins: admins.length, interestedOnly: interestedOnlyCount }, 'org_dashboard_result');
+  logger.info({ orgId, orgFound: !!org, sessions: sessionStats.totalSessions, admins: admins.length, interestedOnly: interestedOnlyCount }, 'org_dashboard_result');
 
   return {
     org,
     stats: {
-      totalStudents: sessionStudentIds.size + interestedOnlyCount,
-      totalHours: Math.round(totalHours * 10) / 10,
-      totalSessions: sessionList.length,
-      verifiedSessions,
-      pendingSessions,
+      totalStudents: sessionStats.studentIds.size + interestedOnlyCount,
+      totalHours: Math.round(sessionStats.totalHours * 10) / 10,
+      totalSessions: sessionStats.totalSessions,
+      verifiedSessions: sessionStats.verifiedSessions,
+      pendingSessions: sessionStats.pendingSessions,
     },
-    recentSessions: sessionList.slice(0, 20),
+    recentSessions,
     admins,
     userRole: adminRecord.role,
     onboardingCompleted: (adminRecord as any).onboarding_completed ?? false,
@@ -640,15 +692,6 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
   const sessionVolunteers = Array.from(studentMap.values())
     .sort((a, b) => b.verifiedHours - a.verifiedHours);
 
-  const _dbg = {
-    rawSessions: (sessions ?? []).length,
-    sessErr: (sessErr as any)?.message ?? null,
-    usersFetched: userById.size,
-    studentMapSize: studentMap.size,
-    firstUserId: (sessions ?? [])[0] ? (sessions as any)[0].user_id : null,
-    firstUserHit: (sessions ?? [])[0] ? !!userById.get((sessions as any)[0].user_id) : null,
-  };
-
   // Append students who registered interest but have no sessions yet.
   // Fetch interests and their users in TWO plain queries — no embedded join,
   // which was returning null and silently dropping interested volunteers.
@@ -659,14 +702,14 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   if (interestErr) {
     logger.warn({ interestErr, orgId }, 'org_volunteers_interest_query_failed');
-    return Object.assign(sessionVolunteers, { _dbg });
+    return sessionVolunteers;
   }
 
   const interestIds = (interests ?? [])
     .map((i: any) => i.user_id as string)
     .filter((id: string) => id && !studentMap.has(id));
 
-  if (interestIds.length === 0) return Object.assign(sessionVolunteers, { _dbg });
+  if (interestIds.length === 0) return sessionVolunteers;
 
   const createdAtById = new Map<string, string>();
   for (const i of interests ?? []) createdAtById.set(i.user_id, i.created_at);
@@ -696,37 +739,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
     isInterested: true,
   }));
 
-  return Object.assign([...sessionVolunteers, ...interestOnly], { _dbg });
-}
-
-// TEMP DEBUG — remove after diagnosing volunteer-hours discrepancy
-export async function _debugOrgVolunteers(orgId: string) {
-  const { data: sessions, error: sessErr } = await supabaseAdmin
-    .from('sessions')
-    .select('id, date, hours, status, activity, user_id')
-    .eq('org_id', orgId)
-    .is('deleted_at', null)
-    .order('date', { ascending: false });
-  const ids = [...new Set((sessions ?? []).map((s: any) => s.user_id).filter(Boolean))];
-  let usersFetched = 0;
-  let uErr: string | null = null;
-  if (ids.length) {
-    const { data: us, error } = await supabaseAdmin
-      .from('users')
-      .select('id, name')
-      .in('id', ids as string[]);
-    usersFetched = (us ?? []).length;
-    uErr = (error as any)?.message ?? null;
-  }
-  return {
-    orgId,
-    rawSessions: (sessions ?? []).length,
-    sessErr: (sessErr as any)?.message ?? null,
-    userIds: ids,
-    usersFetched,
-    uErr,
-    sampleSession: (sessions ?? [])[0] ?? null,
-  };
+  return [...sessionVolunteers, ...interestOnly];
 }
 
 // ─── Verify / dispute session as org ─────────────────────────────────────────
@@ -737,6 +750,8 @@ export async function verifySessionAsOrg(orgId: string, sessionId: string, userI
     .from('sessions')
     .update({
       status: 'verified',
+      // Org admin attestation → institutional tier (SPEC.md Session Verification Tier).
+      verification_tier: 'verified_institutional',
       org_verified_by_user_id: userId,
       org_verified_at: new Date().toISOString(),
     })
@@ -798,6 +813,9 @@ export async function adjustVolunteerHours(
       hours: rounded,
       activity: label,
       status: 'verified',
+      // Org admin is directly attesting these hours — institutional tier
+      // (SPEC.md Session Verification Tier; mirrors confirmAttendance/completeEvent).
+      verification_tier: 'verified_institutional',
       supervisor_name: orgName,
       org_verified_by_user_id: adminUserId,
       org_verified_at: now,

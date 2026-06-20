@@ -509,6 +509,8 @@ export async function confirmAttendance(params: {
     hours,
     activity: (event as any).title,
     status: 'verified',
+    // Org-confirmed attendance → institutional tier (SPEC.md Session Verification Tier).
+    verification_tier: 'verified_institutional',
     supervisor_name: orgName,
     org_verified_by_user_id: confirmedBy,
     org_verified_at: now,
@@ -623,6 +625,8 @@ export async function completeEvent(eventId: string, orgId: string) {
         hours,
         activity: event.title,
         status: 'verified',
+        // Org-confirmed attendance → institutional tier (SPEC.md Session Verification Tier).
+        verification_tier: 'verified_institutional',
         supervisor_name: orgName,
         org_verified_by_user_id: event.created_by,
         org_verified_at: now,

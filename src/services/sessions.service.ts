@@ -117,6 +117,13 @@ export async function createSession(userId: string, input: CreateSessionInput, u
 
   // 2. Resolve org
   const orgId = await resolveOrCreateOrg({ orgId: input.orgId ?? undefined, newOrg: input.newOrg });
+  if (!orgId) {
+    // resolveOrCreateOrg should always return an id or throw, but never write a
+    // supervisor session with a null org_id — it would orphan the row and break
+    // org dashboards (sessions.org_id is nullable since migration 020).
+    logger.error({ userId }, 'create_session_null_org');
+    throw new AppError('org_required', 'A valid organization is required to log verified hours.', 400);
+  }
 
   // 3. Resolve or create authenticator
   const authenticator = await resolveOrCreateAuthenticator({
