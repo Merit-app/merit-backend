@@ -43,6 +43,9 @@ app.use('/webhooks/stripe', express.raw({ type: 'application/json' }), stripeWeb
 app.use('/profiles/me/avatar', express.json({ limit: '10mb' }));
 // Org logo/cover upload also needs the higher limit (base64 of a 5 MB image ≈ 6.7 MB)
 app.use('/organizations/:orgId/logo', express.json({ limit: '10mb' }));
+// Assignment submissions carry base64 file attachments — allow a larger body
+// (the service caps total + per-file size with clean 4xx errors below this).
+app.use('/my-chapter/assignments/:assignmentId/submit', express.json({ limit: '50mb' }));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));

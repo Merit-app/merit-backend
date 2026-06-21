@@ -13,6 +13,7 @@ export const PERMISSIONS = [
   { key: 'manage_team', label: 'Manage team & roles' },
   { key: 'manage_partners', label: 'Manage partner organizations' },
   { key: 'post_opportunities', label: 'Post opportunities' },
+  { key: 'manage_assignments', label: 'Post & review assignments' },
 ] as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[number]['key'];

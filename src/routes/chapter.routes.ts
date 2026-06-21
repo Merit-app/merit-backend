@@ -7,6 +7,7 @@ import * as chapter from '../services/chapter.service';
 import * as team from '../services/chapter-team.service';
 import * as network from '../services/chapter-network.service';
 import * as audit from '../services/chapter-audit.service';
+import * as assignments from '../services/chapter-assignments.service';
 import { success } from '../utils/shape';
 
 const router = Router();
@@ -228,6 +229,48 @@ router.patch('/chapter/roles/:roleId', validateUuidParam('roleId'), validate(rol
 
 router.delete('/chapter/roles/:roleId', validateUuidParam('roleId'), async (req: Request, res: Response, next: NextFunction) => {
   try { res.json(success(await team.deleteRole(req.user!.id, req.params.roleId as string))); } catch (err) { next(err); }
+});
+
+// ── Assignments (coordinator) ────────────────────────────────────────────────
+const createAssignmentSchema = z.object({
+  title: z.string().min(2).max(200),
+  instructions: z.string().max(5000).optional(),
+  dueDate: z.string().date().nullable().optional(),
+});
+router.post('/chapter/assignments', validate(createAssignmentSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.status(201).json(success(await assignments.createAssignment(req.user!.id, req.body))); } catch (err) { next(err); }
+});
+router.get('/chapter/assignments', async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.listAssignments(req.user!.id))); } catch (err) { next(err); }
+});
+router.get('/chapter/assignments/:assignmentId', validateUuidParam('assignmentId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.getAssignmentDetail(req.user!.id, req.params.assignmentId as string))); } catch (err) { next(err); }
+});
+router.delete('/chapter/assignments/:assignmentId', validateUuidParam('assignmentId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.deleteAssignment(req.user!.id, req.params.assignmentId as string))); } catch (err) { next(err); }
+});
+const reviewSubmissionSchema = z.object({ status: z.enum(['submitted', 'reviewed', 'approved', 'returned']) });
+router.post('/chapter/submissions/:submissionId/review', validateUuidParam('submissionId'), validate(reviewSubmissionSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.reviewSubmission(req.user!.id, req.params.submissionId as string, req.body.status))); } catch (err) { next(err); }
+});
+
+// ── Assignments (student) ────────────────────────────────────────────────────
+router.get('/my-chapter/assignments', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.listMyAssignments(req.user!.id))); } catch (err) { next(err); }
+});
+router.get('/my-chapter/assignments/:assignmentId', requireAuth, validateUuidParam('assignmentId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.getMyAssignment(req.user!.id, req.params.assignmentId as string))); } catch (err) { next(err); }
+});
+const submitAssignmentSchema = z.object({
+  note: z.string().max(2000).optional(),
+  files: z.array(z.object({
+    name: z.string().min(1).max(255),
+    contentType: z.string().min(1).max(150),
+    dataBase64: z.string().min(1),
+  })).min(1).max(10),
+});
+router.post('/my-chapter/assignments/:assignmentId/submit', requireAuth, validateUuidParam('assignmentId'), validate(submitAssignmentSchema), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.submitAssignment(req.user!.id, req.params.assignmentId as string, req.body))); } catch (err) { next(err); }
 });
 
 export default router;
