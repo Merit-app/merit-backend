@@ -110,7 +110,7 @@ export async function createAssignment(
     actionUrl: '/my-chapter/assignments',
   });
 
-  void logChapterAction(chapterId, userId, 'create_assignment', { assignmentId: (assignment as any).id, title });
+  void logChapterAction(chapterId, userId, 'create_assignment', { detail: title });
   return assignment;
 }
 
@@ -289,7 +289,7 @@ export async function reviewSubmission(
     });
   }
 
-  void logChapterAction(chapterId, userId, 'review_submission', { submissionId, status });
+  void logChapterAction(chapterId, userId, 'review_submission', { detail: status });
   return { reviewed: true, status };
 }
 
@@ -320,7 +320,7 @@ export async function deleteAssignment(userId: string, assignmentId: string) {
   }
 
   await supabaseAdmin.from('chapter_assignments').delete().eq('id', assignmentId);
-  void logChapterAction(chapterId, userId, 'delete_assignment', { assignmentId });
+  void logChapterAction(chapterId, userId, 'delete_assignment', { detail: assignmentId });
   return { deleted: true };
 }
 
