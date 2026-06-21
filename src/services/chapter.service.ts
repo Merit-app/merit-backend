@@ -234,7 +234,11 @@ export async function getStudentDetail(userId: string, studentId: string) {
     .maybeSingle();
 
   const s = student as any;
-  if (!s || s.chapter_id !== ctx.id) throw new NotFoundError('Student');
+  if (!s || s.chapter_id !== ctx.id) {
+    // TEMP DEBUG (remove): a roster student shouldn't 404 here — surface the values.
+    logger.warn({ userId, studentId, ctxId: ctx.id, studentChapterId: s?.chapter_id, found: !!s }, 'student_detail_not_found_dbg');
+    throw new AppError('not_found', `DBG found=${!!s} ctx=${ctx.id} schap=${s ? String(s.chapter_id) : 'NULL'}`, 404);
+  }
 
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
