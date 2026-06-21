@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from 'crypto';
 import { supabaseAdmin } from '../config/supabase';
 import { AppError, NotFoundError, ForbiddenError } from '../lib/errors';
 import { logger } from '../lib/logger';
