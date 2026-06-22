@@ -227,7 +227,7 @@ export async function getRoster(
 export async function getStudentDetail(userId: string, studentId: string) {
   const ctx = await loadChapterCtx(userId);
 
-  const { data: student } = await supabaseAdmin
+  const { data: student, error: studentErr } = await supabaseAdmin
     .from('users')
     .select('id, name, email, graduation_year, school, chapter_goal_override, chapter_id, avatar_url, username')
     .eq('id', studentId)
@@ -235,9 +235,9 @@ export async function getStudentDetail(userId: string, studentId: string) {
 
   const s = student as any;
   if (!s || s.chapter_id !== ctx.id) {
-    // TEMP DEBUG (remove): a roster student shouldn't 404 here — surface the values.
-    logger.warn({ userId, studentId, ctxId: ctx.id, studentChapterId: s?.chapter_id, found: !!s }, 'student_detail_not_found_dbg');
-    throw new AppError('not_found', `DBG found=${!!s} ctx=${ctx.id} schap=${s ? String(s.chapter_id) : 'NULL'}`, 404);
+    // TEMP DEBUG (remove): a roster student shouldn't 404 here — surface the swallowed query error.
+    logger.warn({ userId, studentId, ctxId: ctx.id, studentChapterId: s?.chapter_id, found: !!s, studentErr }, 'student_detail_not_found_dbg');
+    throw new AppError('not_found', `DBG found=${!!s} err=${(studentErr as any)?.message ?? 'none'} code=${(studentErr as any)?.code ?? '-'}`, 404);
   }
 
   const { data: sessions } = await supabaseAdmin
