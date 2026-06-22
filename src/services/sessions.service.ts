@@ -144,29 +144,45 @@ export async function createSession(userId: string, input: CreateSessionInput, u
   });
 
   // 5. Insert session
+  // sendLater = log it now, hold the supervisor text. The row is "pending" but
+  // verification_sent=false flags it as "Not sent yet" so the student can fire it
+  // later from the By-organization dashboard.
+  // We only set verification_sent on the deferred path; the send-now path relies on
+  // the column DEFAULT (true). That keeps normal logging working even if migration
+  // 040 hasn't been applied yet — only the new "send later" path needs the column.
+  const sendNow = !input.sendLater;
+  const insertRow: Record<string, any> = {
+    user_id: userId,
+    org_id: orgId,
+    date: input.date,
+    hours: input.hours,
+    activity: sanitizeText(input.activity),
+    supervisor_name: sanitizeText(input.supervisorName ?? ''),
+    supervisor_phone: supervisorPhone ?? null,
+    supervisor_email: supervisorEmail ?? null,
+    authenticator_id: authenticator?.id ?? null,
+    status: 'pending',
+    self_reported: false,
+    fraud_score: fraudScore,
+    fraud_flags: fraudFlags,
+  };
+  if (!sendNow) insertRow.verification_sent = false;
+
   const { data: session, error } = await supabaseAdmin
     .from('sessions')
-    .insert({
-      user_id: userId,
-      org_id: orgId,
-      date: input.date,
-      hours: input.hours,
-      activity: sanitizeText(input.activity),
-      supervisor_name: sanitizeText(input.supervisorName ?? ''),
-      supervisor_phone: supervisorPhone ?? null,
-      supervisor_email: supervisorEmail ?? null,
-      authenticator_id: authenticator?.id ?? null,
-      status: 'pending',
-      self_reported: false,
-      fraud_score: fraudScore,
-      fraud_flags: fraudFlags,
-    })
+    .insert(insertRow)
     .select('*, org:organizations(id, name), authenticator:authenticators(id, name, tier)')
     .single();
 
   if (error || !session) {
     logger.error({ error, userId }, 'session_create_failed');
     throw new AppError('create_failed', 'Failed to create session.', 500);
+  }
+
+  if (!sendNow) {
+    // Deferred: skip the send entirely. The student sends it later.
+    trackEvent(userId, 'session_created', { orgId, hours: input.hours, fraudScore, deferred: true });
+    return session;
   }
 
   // 6. Queue or send verifications
@@ -355,6 +371,89 @@ export async function resendVerification(sessionId: string, userId: string, user
 
   logger.info({ sessionId, userId }, 'verification_resent');
   return { queued: true };
+}
+
+// ─── Batch send for deferred ("Not sent yet") sessions ───────────────────────
+// Powers the By-organization dashboard's "Send all" / "Send selected" actions.
+// Sends the FIRST supervisor text for sessions the student logged with "send
+// later". Safety: the query can ONLY ever match rows that are pending, NOT
+// self-reported, NOT already sent, and that actually carry a contact — so a
+// self-tracked session is structurally incapable of being texted here, even if
+// a bad sessionId were passed in.
+export async function sendVerifications(
+  userId: string,
+  opts: { sessionIds?: string[]; orgId?: string },
+  userPlan: string,
+  userName = 'Student',
+) {
+  let query = supabaseAdmin
+    .from('sessions')
+    .select('*, org:organizations(id, name)')
+    .eq('user_id', userId)
+    .eq('status', 'pending')
+    .eq('self_reported', false)
+    .eq('verification_sent', false)
+    .is('deleted_at', null);
+
+  if (opts.sessionIds && opts.sessionIds.length > 0) query = query.in('id', opts.sessionIds);
+  if (opts.orgId) query = query.eq('org_id', opts.orgId);
+
+  const { data: rows, error } = await query;
+  if (error) {
+    logger.error({ error, userId }, 'send_verifications_query_failed');
+    throw new AppError('query_failed', 'Could not load the sessions to send.', 500);
+  }
+
+  // Only rows that actually have somewhere to send (defence-in-depth — the
+  // verified path always captures a contact, but never trust that here).
+  const list = (rows ?? []).filter((s: any) => s.supervisor_phone || s.supervisor_email);
+  if (list.length === 0) return { sent: 0, skipped: 0 };
+
+  const userForSend = { id: userId, name: userName, plan: userPlan };
+  let sent = 0;
+
+  for (const session of list) {
+    let didSend = false;
+
+    if (session.supervisor_phone) {
+      try {
+        if (smsQueue) {
+          await smsQueue.add('verification_sms', { type: 'verification_sms', session, user: userForSend });
+        } else {
+          await sendVerificationSMS(session, userForSend);
+        }
+        didSend = true;
+      } catch (err: any) {
+        logger.error({ sessionId: session.id, err: err?.message }, 'deferred_sms_send_failed');
+      }
+    }
+
+    if (session.supervisor_email) {
+      try {
+        if (smsQueue) {
+          await smsQueue.add('verification_email', { type: 'verification_email', session, user: userForSend });
+        } else {
+          await sendVerificationEmail(session, userForSend);
+        }
+        didSend = true;
+      } catch (err: any) {
+        logger.error({ sessionId: session.id, err: err?.message }, 'deferred_email_send_failed');
+      }
+    }
+
+    if (didSend) {
+      await supabaseAdmin
+        .from('sessions')
+        .update({ verification_sent: true })
+        .eq('id', session.id)
+        .eq('user_id', userId);
+      sent += 1;
+    }
+  }
+
+  logger.info({ userId, requested: list.length, sent }, 'deferred_verifications_sent');
+  trackEvent(userId, 'verifications_batch_sent', { count: sent });
+  return { sent, skipped: list.length - sent };
 }
 
 // ─── Public verification lookup (no auth — limited fields) ────────────────

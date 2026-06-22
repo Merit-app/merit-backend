@@ -17,6 +17,10 @@ export const createSessionSchema = z.object({
   supervisorPhone: z.string().optional().nullable(),
   supervisorEmail: z.string().email().optional().nullable(),
   selfReported: z.boolean().default(false),
+  // When true, log the verified session but DON'T text the supervisor yet — it
+  // sits as "Not sent yet" until the student sends it (individually or in a batch).
+  // Supervisor name + a contact are still required so the deferred send is one tap.
+  sendLater: z.boolean().default(false),
   trackerNote: z.string().max(200).optional(),
 }).refine((d) => d.orgId || d.newOrg, {
   message: 'Must provide orgId or newOrg',

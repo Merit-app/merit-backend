@@ -87,6 +87,36 @@ router.post(
   },
 );
 
+// POST /sessions/send-verifications — fire the supervisor text for deferred
+// ("Not sent yet") sessions, scoped by sessionIds and/or a single org.
+const sendVerificationsSchema = z
+  .object({
+    sessionIds: z.array(z.string().uuid()).max(200).optional(),
+    orgId: z.string().uuid().optional(),
+  })
+  .refine((d) => (d.sessionIds && d.sessionIds.length > 0) || d.orgId, {
+    message: 'Provide sessionIds or orgId.',
+  });
+
+router.post(
+  '/sessions/send-verifications',
+  rateLimit('send_verifications', { max: 30 }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = sendVerificationsSchema.parse(req.body);
+      const result = await sessionsService.sendVerifications(
+        req.user!.id,
+        body,
+        req.user!.plan,
+        req.user!.name,
+      );
+      res.json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // PATCH /sessions/:id
 router.patch(
   '/sessions/:id',
