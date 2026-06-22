@@ -233,12 +233,15 @@ export async function getStudentDetail(userId: string, studentId: string) {
     .eq('id', studentId)
     .maybeSingle();
 
-  const s = student as any;
-  if (!s || s.chapter_id !== ctx.id) {
-    // TEMP DEBUG (remove): a roster student shouldn't 404 here — surface the swallowed query error.
-    logger.warn({ userId, studentId, ctxId: ctx.id, studentChapterId: s?.chapter_id, found: !!s, studentErr }, 'student_detail_not_found_dbg');
-    throw new AppError('not_found', `DBG found=${!!s} err=${(studentErr as any)?.message ?? 'none'} code=${(studentErr as any)?.code ?? '-'}`, 404);
+  // A failed query (e.g. a missing column → 42703) is NOT the same as "no such
+  // student" — don't let it masquerade as a 404. Surface it so it's diagnosable.
+  if (studentErr) {
+    logger.error({ studentErr, studentId, ctxId: ctx.id }, 'student_detail_query_failed');
+    throw new AppError('query_failed', 'Could not load the student.', 500);
   }
+
+  const s = student as any;
+  if (!s || s.chapter_id !== ctx.id) throw new NotFoundError('Student');
 
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
