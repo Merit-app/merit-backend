@@ -253,6 +253,10 @@ const reviewSubmissionSchema = z.object({ status: z.enum(['submitted', 'reviewed
 router.post('/chapter/submissions/:submissionId/review', validateUuidParam('submissionId'), validate(reviewSubmissionSchema), async (req: Request, res: Response, next: NextFunction) => {
   try { res.json(success(await assignments.reviewSubmission(req.user!.id, req.params.submissionId as string, req.body.status))); } catch (err) { next(err); }
 });
+// One student's assignment status (for the coordinator student-detail page).
+router.get('/chapter/students/:studentId/assignments', validateUuidParam('studentId'), async (req: Request, res: Response, next: NextFunction) => {
+  try { res.json(success(await assignments.getStudentAssignments(req.user!.id, req.params.studentId as string))); } catch (err) { next(err); }
+});
 
 // ── Assignments (student) ────────────────────────────────────────────────────
 router.get('/my-chapter/assignments', requireAuth, async (req: Request, res: Response, next: NextFunction) => {

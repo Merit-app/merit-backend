@@ -324,6 +324,81 @@ export async function deleteAssignment(userId: string, assignmentId: string) {
   return { deleted: true };
 }
 
+/** Coordinator view of ONE student's assignment status (submitted / outstanding). */
+export async function getStudentAssignments(userId: string, studentId: string) {
+  const chapterId = await getCoordinatorChapterId(userId);
+  await assertPermission(userId, chapterId, 'view_roster');
+
+  const { data: student, error: sErr } = await supabaseAdmin
+    .from('users')
+    .select('id, chapter_id')
+    .eq('id', studentId)
+    .maybeSingle();
+  if (sErr) {
+    logger.error({ sErr, studentId }, 'student_assignments_user_query_failed');
+    throw new AppError('query_failed', 'Could not load the student.', 500);
+  }
+  if (!student || (student as any).chapter_id !== chapterId) throw new NotFoundError('Student');
+
+  const { data: assignments, error: aErr } = await supabaseAdmin
+    .from('chapter_assignments')
+    .select('id, title, instructions, due_date, created_at')
+    .eq('chapter_id', chapterId)
+    .order('created_at', { ascending: false });
+  if (aErr) {
+    // Assignments tables may not be migrated yet (038) — degrade to empty, don't 500.
+    logger.warn({ aErr, chapterId }, 'student_assignments_list_failed');
+    return [];
+  }
+  const list = (assignments as any[] | null) ?? [];
+  if (!list.length) return [];
+
+  const { data: subs } = await supabaseAdmin
+    .from('assignment_submissions')
+    .select('id, assignment_id, note, status, submitted_at, reviewed_at')
+    .eq('user_id', studentId)
+    .in('assignment_id', list.map((a) => a.id));
+  const subByAssignment = new Map<string, any>();
+  for (const s of (subs as any[] | null) ?? []) subByAssignment.set(s.assignment_id, s);
+
+  const subIds = ((subs as any[] | null) ?? []).map((s) => s.id);
+  const filesBySub = new Map<string, any[]>();
+  if (subIds.length) {
+    const { data: files } = await supabaseAdmin
+      .from('assignment_submission_files')
+      .select('id, submission_id, storage_path, file_name, content_type, size_bytes')
+      .in('submission_id', subIds);
+    for (const f of (files as any[] | null) ?? []) {
+      const arr = filesBySub.get(f.submission_id) ?? [];
+      arr.push(f);
+      filesBySub.set(f.submission_id, arr);
+    }
+  }
+
+  return Promise.all(
+    list.map(async (a) => {
+      const sub = subByAssignment.get(a.id);
+      return {
+        id: a.id,
+        title: a.title,
+        instructions: a.instructions,
+        dueDate: a.due_date,
+        createdAt: a.created_at,
+        submission: sub
+          ? {
+              id: sub.id,
+              note: sub.note,
+              status: sub.status,
+              submittedAt: sub.submitted_at,
+              reviewedAt: sub.reviewed_at,
+              files: await signFiles(filesBySub.get(sub.id) ?? []),
+            }
+          : null,
+      };
+    }),
+  );
+}
+
 // ─── Student ─────────────────────────────────────────────────────────────────
 
 export async function listMyAssignments(userId: string) {
