@@ -23,7 +23,7 @@ export async function submitOrgClaim(params: {
   orgId: string;
   role: ClaimRole;
   workEmail: string;
-}): Promise<{ claimId: string; status: ClaimStatus; autoApproved: boolean }> {
+}): Promise<{ claimId: string; status: ClaimStatus; autoApproved: boolean; emailConfirmationRequired: boolean }> {
   const { userId, orgId, role, workEmail } = params;
 
   // 1. Load org
@@ -47,7 +47,8 @@ export async function submitOrgClaim(params: {
 
   if (existingClaim) throw new Error('You already have a pending claim for this organization');
 
-  // 3. Domain matching
+  // 3. Domain matching — determines whether the claimant is ELIGIBLE to self-serve (after
+  //    proving they control a mailbox at the org's domain) vs. needs manual review.
   const emailDomain = workEmail.split('@')[1]?.toLowerCase() ?? '';
 
   let orgDomain: string | null = null;
@@ -62,10 +63,13 @@ export async function submitOrgClaim(params: {
 
   const contactDomain = org.contact_email?.split('@')[1]?.toLowerCase() ?? null;
   const domainMatch = !!(orgDomain && (emailDomain === orgDomain || emailDomain === contactDomain));
-  const status: ClaimStatus = domainMatch ? 'approved' : 'pending';
 
-  // 4. Insert claim
-  // Column names in org_claims: email, email_domain (not work_email/work_email_domain)
+  // 4. Insert the claim. SECURITY: a domain match alone must NOT grant admin — the work email
+  //    is attacker-supplied and unverified, so "name@orgdomain" with no mailbox access was an
+  //    org-takeover vector. Every claim starts 'pending'. Domain-matched claims receive an
+  //    email-ownership confirmation link and are only approved once the recipient (who must
+  //    actually control the org mailbox) clicks it; everyone else goes to manual review.
+  const verificationToken = crypto.randomUUID();
   const { data: claim, error: claimError } = await supabaseAdmin
     .from('org_claims')
     .insert({
@@ -74,10 +78,10 @@ export async function submitOrgClaim(params: {
       role,
       email: workEmail,
       email_domain: emailDomain,
-      status,
-      verification_token: crypto.randomUUID(),
+      status: 'pending',
+      verification_token: verificationToken,
       domain_matched: domainMatch,
-      reviewed_at: domainMatch ? new Date().toISOString() : null,
+      reviewed_at: null,
     })
     .select('id')
     .single();
@@ -87,26 +91,59 @@ export async function submitOrgClaim(params: {
     throw new Error('Failed to submit claim');
   }
 
-  // 5. Auto-approve path: mark org as claimed + add org admin row
+  // 5. Route the claim.
   if (domainMatch) {
-    await Promise.all([
-      supabaseAdmin
-        .from('organizations')
-        .update({ claimed: true, claimed_at: new Date().toISOString() })
-        .eq('id', orgId),
-      supabaseAdmin
-        .from('org_admins')
-        .insert({ org_id: orgId, user_id: userId, role }),
-    ]);
-
-    await sendClaimApprovedEmail({ to: workEmail, orgName: org.name, orgSlug: org.slug ?? '' });
+    // Prove mailbox ownership before granting anything.
+    await sendClaimConfirmEmail({ to: workEmail, orgName: org.name, token: verificationToken });
   } else {
-    // Manual-review path: notify claimant + admin
     await sendClaimUnderReviewEmail({ to: workEmail, orgName: org.name });
     await sendClaimAdminNotificationEmail({ claimId: claim.id, orgName: org.name, workEmail, role });
   }
 
-  return { claimId: claim.id, status, autoApproved: domainMatch };
+  return { claimId: claim.id, status: 'pending', autoApproved: false, emailConfirmationRequired: domainMatch };
+}
+
+// ─── Confirm email ownership for a domain-matched claim → grant admin ────────
+
+export async function confirmOrgClaim(token: string): Promise<{ orgSlug: string }> {
+  const { data: claim } = await supabaseAdmin
+    .from('org_claims')
+    .select('id, org_id, user_id, role, email, status, domain_matched')
+    .eq('verification_token', token)
+    .maybeSingle();
+
+  if (!claim) throw new Error('Claim not found');
+
+  const { data: org } = await supabaseAdmin
+    .from('organizations')
+    .select('id, name, slug, claimed')
+    .eq('id', claim.org_id)
+    .single();
+  if (!org) throw new Error('Organization not found');
+
+  // Idempotent: a repeat click (e.g. mail scanner then human) is a no-op success.
+  if (claim.status === 'approved') return { orgSlug: org.slug ?? '' };
+
+  // Only domain-matched, still-pending claims may be confirmed by email link.
+  if (claim.status !== 'pending' || !claim.domain_matched) {
+    throw new Error('This claim is not eligible for email confirmation');
+  }
+  if (org.claimed) throw new Error('This organization has already been claimed');
+
+  await supabaseAdmin
+    .from('org_claims')
+    .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+    .eq('id', claim.id);
+  await supabaseAdmin
+    .from('organizations')
+    .update({ claimed: true, claimed_at: new Date().toISOString() })
+    .eq('id', org.id);
+  await supabaseAdmin
+    .from('org_admins')
+    .insert({ org_id: org.id, user_id: claim.user_id, role: claim.role });
+
+  await sendClaimApprovedEmail({ to: claim.email, orgName: org.name, orgSlug: org.slug ?? '' });
+  return { orgSlug: org.slug ?? '' };
 }
 
 // ─── Get claim status for a user + org ───────────────────────────────────────
@@ -193,6 +230,21 @@ async function sendClaimApprovedEmail(p: { to: string; orgName: string; orgSlug:
       <p style="color:#6B7280;font-size:12px;">Merit · meritco.app</p>
     `,
   }).catch((err) => logger.error(err, 'claim_approved_email_failed'));
+}
+
+async function sendClaimConfirmEmail(p: { to: string; orgName: string; token: string }) {
+  const url = `${env.API_BASE_URL ?? 'http://localhost:3001'}/org-claims/confirm?token=${p.token}`;
+  await sendEmail({
+    to: p.to,
+    subject: `Confirm your claim for ${p.orgName} on Merit`,
+    html: `
+      <p>You requested to manage <strong>${p.orgName}</strong> on Merit.</p>
+      <p>Confirm you control this email address to become an admin:</p>
+      <p><a href="${url}">Confirm and manage ${p.orgName} →</a></p>
+      <p style="color:#6B7280;font-size:12px;">If you didn't request this, ignore this email — no changes will be made and no one gains access.</p>
+      <p style="color:#6B7280;font-size:12px;">Merit · meritco.app</p>
+    `,
+  }).catch((err) => logger.error(err, 'claim_confirm_email_failed'));
 }
 
 async function sendClaimUnderReviewEmail(p: { to: string; orgName: string }) {

@@ -81,6 +81,24 @@ router.post(
   },
 );
 
+// GET /org-claims/confirm?token=... — confirm email ownership for a domain-matched claim.
+// Public (the random token IS the credential); only someone who receives mail at the org's
+// domain can reach this link, which is exactly the ownership proof we require before granting admin.
+router.get(
+  '/org-claims/confirm',
+  async (req: Request, res: Response) => {
+    const frontend = env.FRONTEND_URL ?? 'http://localhost:3000';
+    try {
+      const token = z.string().uuid().parse(req.query.token);
+      const { orgSlug } = await orgClaimsService.confirmOrgClaim(token);
+      return res.redirect(302, `${frontend}/organizations/${orgSlug}?claimed=1`);
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, 'org_claim_confirm_failed');
+      return res.redirect(302, `${frontend}/organizations?claim_error=1`);
+    }
+  },
+);
+
 // GET /org-claims/status/:orgId — get this user's claim status for an org
 router.get(
   '/org-claims/status/:orgId',

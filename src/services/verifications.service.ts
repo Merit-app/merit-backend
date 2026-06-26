@@ -301,21 +301,33 @@ async function checkWhitelisted(authenticator: any, userId: string): Promise<boo
 
   if (!user?.chapter_id) return false;
 
-  const { data } = await supabaseAdmin
-    .from('supervisor_whitelist')
-    .select('id')
-    .eq('chapter_id', user.chapter_id)
-    .or(
-      [
-        authenticator.email ? `email_lower.eq.${authenticator.email.toLowerCase()}` : null,
-        authenticator.phone ? `phone.eq.${authenticator.phone}` : null,
-      ]
-        .filter(Boolean)
-        .join(','),
-    )
-    .maybeSingle();
+  // Match by email or phone within the chapter. Use parameterized .eq() (the value is sent
+  // as a discrete query arg, not interpolated into a PostgREST filter string) so a crafted
+  // email/phone can't inject extra filter clauses to widen the whitelist match.
+  const email = authenticator.email ? String(authenticator.email).toLowerCase() : null;
+  const phone = authenticator.phone ? String(authenticator.phone) : null;
 
-  return !!data;
+  if (email) {
+    const { data } = await supabaseAdmin
+      .from('supervisor_whitelist')
+      .select('id')
+      .eq('chapter_id', user.chapter_id)
+      .eq('email_lower', email)
+      .maybeSingle();
+    if (data) return true;
+  }
+
+  if (phone) {
+    const { data } = await supabaseAdmin
+      .from('supervisor_whitelist')
+      .select('id')
+      .eq('chapter_id', user.chapter_id)
+      .eq('phone', phone)
+      .maybeSingle();
+    if (data) return true;
+  }
+
+  return false;
 }
 
 async function createVerificationNotification(
