@@ -117,6 +117,27 @@ router.post(
   },
 );
 
+// POST /sessions/share — student chooses which sessions/orgs their school can see.
+const shareSchema = z
+  .object({
+    sessionIds: z.array(z.string().uuid()).max(500).optional(),
+    orgId: z.string().uuid().optional(),
+    shared: z.boolean(),
+  })
+  .refine((d) => (d.sessionIds && d.sessionIds.length > 0) || d.orgId, {
+    message: 'Provide sessionIds or orgId.',
+  });
+
+router.post('/sessions/share', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const body = shareSchema.parse(req.body);
+    const result = await sessionsService.setSessionsShared(req.user!.id, body);
+    res.json(success(result));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // PATCH /sessions/:id
 router.patch(
   '/sessions/:id',

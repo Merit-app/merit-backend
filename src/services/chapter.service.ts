@@ -93,6 +93,7 @@ async function hoursByMember(memberIds: string[], chapterId: string): Promise<Ma
     .in('user_id', memberIds)
     .eq('status', 'verified')
     .eq('self_reported', false)
+    .eq('shared_with_chapter', true) // students control what their school can count/see
     .is('deleted_at', null);
   for (const s of (sessions as any[] | null) ?? []) {
     map.set(s.user_id, (map.get(s.user_id) ?? 0) + Number(s.hours ?? 0));
@@ -243,10 +244,12 @@ export async function getStudentDetail(userId: string, studentId: string) {
   const s = student as any;
   if (!s || s.chapter_id !== ctx.id) throw new NotFoundError('Student');
 
+  // Coordinator only sees the sessions the student chose to share with the school.
   const { data: sessions } = await supabaseAdmin
     .from('sessions')
     .select('id, hours, date, status, self_reported, org:organizations(name)')
     .eq('user_id', studentId)
+    .eq('shared_with_chapter', true)
     .is('deleted_at', null)
     .order('date', { ascending: false });
 

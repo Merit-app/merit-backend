@@ -587,6 +587,7 @@ export async function getGrantReport(
     .from('sessions')
     .select('user_id, hours, status, verification_tier, date, org:organizations(name)')
     .in('user_id', memberIds)
+    .eq('shared_with_chapter', true) // only student-shared hours appear in school reports
     .is('deleted_at', null)
     .order('date', { ascending: false });
 
@@ -684,6 +685,7 @@ export async function getCompliance(userId: string): Promise<ComplianceReport> {
       .in('user_id', memberIds)
       .eq('status', 'verified')
       .eq('self_reported', false)
+      .eq('shared_with_chapter', true) // only student-shared hours count toward compliance
       .is('deleted_at', null);
 
     for (const s of (sessions as any[] | null) ?? []) {

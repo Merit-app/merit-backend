@@ -456,6 +456,34 @@ export async function sendVerifications(
   return { sent, skipped: list.length - sent };
 }
 
+// ─── Share control: which sessions/orgs the student's school can see ─────────
+// Student-only, scoped to their own rows. Toggle a whole org (orgId) or specific
+// sessionIds. Only shared + verified hours count toward the chapter requirement and
+// appear in the coordinator's dashboard/reports.
+export async function setSessionsShared(
+  userId: string,
+  opts: { sessionIds?: string[]; orgId?: string; shared: boolean },
+): Promise<{ updated: number }> {
+  if ((!opts.sessionIds || opts.sessionIds.length === 0) && !opts.orgId) {
+    throw new AppError('missing_target', 'Provide sessionIds or orgId.', 400);
+  }
+  let query = supabaseAdmin
+    .from('sessions')
+    .update({ shared_with_chapter: opts.shared })
+    .eq('user_id', userId)
+    .is('deleted_at', null);
+  if (opts.orgId) query = query.eq('org_id', opts.orgId);
+  if (opts.sessionIds && opts.sessionIds.length > 0) query = query.in('id', opts.sessionIds);
+
+  const { data, error } = await query.select('id');
+  if (error) {
+    logger.error({ error, userId }, 'set_sessions_shared_failed');
+    throw new AppError('share_update_failed', 'Failed to update sharing.', 500);
+  }
+  trackEvent(userId, 'sessions_share_updated', { count: (data ?? []).length, shared: opts.shared });
+  return { updated: (data ?? []).length };
+}
+
 // ─── Public verification lookup (no auth — limited fields) ────────────────
 
 export async function getSessionForVerification(sessionId: string) {
