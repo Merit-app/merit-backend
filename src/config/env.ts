@@ -64,6 +64,12 @@ const envSchema = z.preprocess(coerceEmptyStrings, z.object({
   // CORS
   ALLOWED_ORIGINS: z.string().optional(),
 
+  // Per-IP auth rate limits (per hour). Defaults are generous enough that a whole
+  // class onboarding behind ONE school/NAT public IP won't lock itself out —
+  // schools are a target persona. Override per-deployment via Railway env vars.
+  SIGNUP_IP_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(60),
+  LOGIN_IP_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(120),
+
   // Feature flags
   ENABLE_TRUST_SCORING: z.coerce.boolean().default(true),
   ENABLE_FRAUD_DETECTION: z.coerce.boolean().default(true),

@@ -26,6 +26,24 @@ router.get(
   },
 );
 
+// GET /verifications/lookup?token=…  (public — powers the confirm page)
+router.get(
+  '/verifications/lookup',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const token = typeof req.query.token === 'string' ? req.query.token : '';
+      if (!token) {
+        res.status(400).json({ error: 'Missing token' });
+        return;
+      }
+      const result = await verificationsService.getVerificationByToken(token);
+      res.json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // POST /verifications/confirm-magic-link
 router.post(
   '/verifications/confirm-magic-link',

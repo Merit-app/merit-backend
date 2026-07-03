@@ -746,6 +746,22 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
 export async function verifySessionAsOrg(orgId: string, sessionId: string, userId: string) {
   await requireOrgAdmin(orgId, userId);
+
+  // Load current state first: (a) confirm the session belongs to this org,
+  // (b) make the action idempotent so a double-click / retry can't re-write an
+  // already-verified row. An org admin CAN override a supervisor-disputed row
+  // (institutional attestation is the highest tier), but that override is now
+  // explicit rather than a silent clobber.
+  const { data: current } = await supabaseAdmin
+    .from('sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (!current) throw new NotFoundError('Session');
+  if ((current as any).status === 'verified') return { verified: true, alreadyVerified: true };
+
   const { error } = await supabaseAdmin
     .from('sessions')
     .update({
@@ -758,11 +774,22 @@ export async function verifySessionAsOrg(orgId: string, sessionId: string, userI
     .eq('id', sessionId)
     .eq('org_id', orgId);
   if (error) throw error;
-  return { verified: true };
+  return { verified: true, overrodeDispute: (current as any).status === 'disputed' };
 }
 
 export async function disputeSessionAsOrg(orgId: string, sessionId: string, userId: string) {
   await requireOrgAdmin(orgId, userId);
+
+  const { data: current } = await supabaseAdmin
+    .from('sessions')
+    .select('status')
+    .eq('id', sessionId)
+    .eq('org_id', orgId)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (!current) throw new NotFoundError('Session');
+  if ((current as any).status === 'disputed') return { disputed: true, alreadyDisputed: true };
+
   const { error } = await supabaseAdmin
     .from('sessions')
     .update({ status: 'disputed' })

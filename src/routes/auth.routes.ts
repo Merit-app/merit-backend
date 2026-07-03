@@ -88,7 +88,7 @@ async function createMeritAccount(email: string, password: string, name: string)
 // POST /auth/signup
 router.post(
   '/auth/signup',
-  ipRateLimit('signup', 5, 1),
+  ipRateLimit('signup', env.SIGNUP_IP_LIMIT_PER_HOUR, 1),
   validate(signupSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -103,7 +103,7 @@ router.post(
 // POST /auth/login
 router.post(
   '/auth/login',
-  ipRateLimit('login', 10, 1),
+  ipRateLimit('login', env.LOGIN_IP_LIMIT_PER_HOUR, 1),
   validate(loginSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -162,6 +162,42 @@ export async function getSessionVerifications(sessionId: string, userId: string)
   return data ?? [];
 }
 
+// ─── Look up a pending email verification by token (for the confirm page) ──
+
+/**
+ * Public, read-only summary of what a magic-link token is asking the supervisor
+ * to confirm. Powers the `/verify?token=…` confirmation page so the supervisor
+ * sees the student / hours / org BEFORE they click, and so we never auto-confirm
+ * on page load (email link-scanners would otherwise trip a confirmation).
+ * Returns a `state` the page can branch on instead of throwing for the normal
+ * "already answered / expired" cases.
+ */
+export async function getVerificationByToken(token: string) {
+  const { data } = await supabaseAdmin
+    .from('verifications')
+    .select('id, responded_at, token_expires_at, session:sessions(hours, date, supervisor_name, status, org:organizations(name), user:users(name))')
+    .eq('confirmation_token', token)
+    .maybeSingle();
+
+  if (!data) return { state: 'invalid' as const };
+
+  const v = data as any;
+  if (v.responded_at) return { state: 'already_responded' as const };
+  if (v.token_expires_at && new Date(v.token_expires_at) < new Date()) {
+    return { state: 'expired' as const };
+  }
+
+  const session = v.session ?? {};
+  return {
+    state: 'pending' as const,
+    studentName: session.user?.name ?? 'A student',
+    supervisorName: session.supervisor_name ?? null,
+    orgName: session.org?.name ?? 'their organization',
+    hours: Number(session.hours ?? 0),
+    date: session.date ?? null,
+  };
+}
+
 // ─── Process verification response (magic link or webhook) ───────────────
 
 export async function processVerificationResponse(opts: {

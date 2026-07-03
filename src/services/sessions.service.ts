@@ -18,6 +18,36 @@ import type { CreateSessionInput, UpdateSessionInput } from '../schemas/sessions
 
 const RESEND_LIMITS: Record<string, number> = { free: 2, pro: 5, premium: 999, institutional: 999 };
 
+/**
+ * Idempotency guard against double-submits. A double-tapped "Log" button (or a
+ * client retry on a slow connection) would otherwise insert two identical
+ * sessions AND fire the supervisor SMS/email twice (real Twilio cost + duplicated
+ * hours). If an identical session for this user/org/date/hours was created in the
+ * last few seconds, return it instead of creating a new one.
+ */
+const DEDUPE_WINDOW_MS = 15_000;
+async function findRecentDuplicate(
+  userId: string,
+  orgId: string | null,
+  date: string,
+  hours: number,
+) {
+  const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString();
+  let q = supabaseAdmin
+    .from('sessions')
+    .select('*, org:organizations(id, name), authenticator:authenticators(id, name, tier)')
+    .eq('user_id', userId)
+    .eq('date', date)
+    .eq('hours', hours)
+    .is('deleted_at', null)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  q = orgId ? q.eq('org_id', orgId) : q.is('org_id', null);
+  const { data } = await q.maybeSingle();
+  return data ?? null;
+}
+
 export async function getSessions(
   userId: string,
   filters: {
@@ -74,6 +104,12 @@ export async function createSession(userId: string, input: CreateSessionInput, u
   if (input.selfReported) {
     const orgId = await resolveOrCreateOrg({ orgId: input.orgId ?? undefined, newOrg: input.newOrg });
 
+    const dup = await findRecentDuplicate(userId, orgId, input.date, input.hours);
+    if (dup) {
+      logger.info({ sessionId: dup.id, userId }, 'self_reported_session_deduped');
+      return dup;
+    }
+
     const { data: session, error } = await supabaseAdmin
       .from('sessions')
       .insert({
@@ -123,6 +159,14 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     // org dashboards (sessions.org_id is nullable since migration 020).
     logger.error({ userId }, 'create_session_null_org');
     throw new AppError('org_required', 'A valid organization is required to log verified hours.', 400);
+  }
+
+  // 2b. Double-submit guard — return the just-created row instead of logging a
+  // second identical session (which would also fire a second supervisor text).
+  const dup = await findRecentDuplicate(userId, orgId, input.date, input.hours);
+  if (dup) {
+    logger.info({ sessionId: dup.id, userId }, 'session_deduped');
+    return dup;
   }
 
   // 3. Resolve or create authenticator
