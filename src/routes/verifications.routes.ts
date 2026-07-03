@@ -8,6 +8,26 @@ import { success } from '../utils/shape';
 
 const router = Router();
 
+// GET /verifications/lookup?token=…  (public — powers the confirm page)
+// MUST be registered before GET /verifications/:sessionId, otherwise the literal
+// "lookup" path is captured by the :sessionId param route (which requires auth).
+router.get(
+  '/verifications/lookup',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const token = typeof req.query.token === 'string' ? req.query.token : '';
+      if (!token) {
+        res.status(400).json({ error: 'Missing token' });
+        return;
+      }
+      const result = await verificationsService.getVerificationByToken(token);
+      res.json(success(result));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 // GET /verifications/:sessionId
 router.get(
   '/verifications/:sessionId',
@@ -20,24 +40,6 @@ router.get(
         req.user!.id,
       );
       res.json(success(verifications));
-    } catch (err) {
-      next(err);
-    }
-  },
-);
-
-// GET /verifications/lookup?token=…  (public — powers the confirm page)
-router.get(
-  '/verifications/lookup',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const token = typeof req.query.token === 'string' ? req.query.token : '';
-      if (!token) {
-        res.status(400).json({ error: 'Missing token' });
-        return;
-      }
-      const result = await verificationsService.getVerificationByToken(token);
-      res.json(success(result));
     } catch (err) {
       next(err);
     }
