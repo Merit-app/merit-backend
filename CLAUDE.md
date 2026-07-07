@@ -1,6 +1,6 @@
 # merit-backend
 
-Express 4 + TypeScript (strict) REST API on Railway. Supabase (Postgres + Auth), Twilio SMS, Resend email, Stripe billing, BullMQ/Redis queues — every third-party service falls back to a mock when its creds are absent, so the API runs locally with zero secrets.
+Express 5 + TypeScript (strict) REST API on Railway (`express ^5.2.1` — v5 semantics: async handler errors propagate to the error middleware automatically). Supabase (Postgres + Auth), Twilio SMS, Resend email, Stripe billing, BullMQ/Redis queues — every third-party service falls back to a mock when its creds are absent, so the API runs locally with zero secrets.
 
 ## Commands
 - `npm run dev` — ts-node-dev on :3001
@@ -16,3 +16,4 @@ Express 4 + TypeScript (strict) REST API on Railway. Supabase (Postgres + Auth),
 - Routes thin, services fat. Zod-validate every input. Anything slow or third-party goes through a BullMQ queue, not the request loop.
 - **Migrations are manual.** New SQL in `migrations/` must be run in the Supabase SQL editor before code depending on it ships. Always state explicitly when a push leaves a migration unapplied.
 - Verification, trust, and fraud logic is the product's credibility. Changes to `verifications`, `trust.service`, `fraud.service`, or the Twilio/Stripe webhooks need extra care and tests.
+- Known issues live in `../GAPS.md` (workspace root) — check it before diagnosing a "new" bug. **There are currently ZERO test files** (GAP-101) despite vitest being configured; every proven bug-fix should land with its regression test.
