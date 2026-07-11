@@ -325,8 +325,15 @@ router.post('/:orgId/certificates', requireAuth, requireOrgPlan('pro'), async (r
       coordinatorTitle: z.string().max(100).optional(),
       certTitle: z.string().max(120).optional(),
       customMessage: z.string().max(600).optional(),
+      // Optional handwritten signature as a base64 image data URL (~8 MB cap).
+      signatureDataUrl: z
+        .string()
+        .max(8_000_000)
+        .regex(/^data:image\/(png|jpe?g);base64,/, 'Signature must be a PNG or JPEG image')
+        .optional(),
     });
-    const { userId, coordinatorName, coordinatorTitle, certTitle, customMessage } = schema.parse(req.body);
+    const { userId, coordinatorName, coordinatorTitle, certTitle, customMessage, signatureDataUrl } =
+      schema.parse(req.body);
 
     const pdfBuffer = await reportsService.generateVolunteerCertificate({
       orgId: req.params.orgId as string,
@@ -335,6 +342,7 @@ router.post('/:orgId/certificates', requireAuth, requireOrgPlan('pro'), async (r
       coordinatorTitle,
       certTitle,
       customMessage,
+      signatureDataUrl,
     });
 
     res.setHeader('Content-Type', 'application/pdf');

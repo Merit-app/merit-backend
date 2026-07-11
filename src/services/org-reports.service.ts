@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
+import { Document, Page, Text, View, Image, StyleSheet, pdf } from '@react-pdf/renderer';
 import { supabaseAdmin } from '../config/supabase';
 import { logger } from '../lib/logger';
 
@@ -292,6 +292,7 @@ export async function generateVolunteerCertificate(params: {
   coordinatorTitle?: string;
   certTitle?: string;
   customMessage?: string;
+  signatureDataUrl?: string;
 }) {
   const { orgId, userId, coordinatorName } = params;
   // Customizable fields — fall back to sensible defaults when the org leaves
@@ -299,6 +300,11 @@ export async function generateVolunteerCertificate(params: {
   const certTitle = params.certTitle?.trim() || 'Certificate of Recognition';
   const coordinatorTitle = params.coordinatorTitle?.trim() || 'Volunteer Coordinator';
   const customMessage = params.customMessage?.trim() || '';
+  // Optional handwritten signature — only rendered when it's a valid image data URL.
+  const signatureDataUrl =
+    params.signatureDataUrl && /^data:image\/(png|jpe?g);base64,/.test(params.signatureDataUrl)
+      ? params.signatureDataUrl
+      : undefined;
 
   const [orgResult, userResult, sessionsResult] = await Promise.all([
     supabaseAdmin
@@ -332,47 +338,60 @@ export async function generateVolunteerCertificate(params: {
   const lastDate = sessions[sessions.length - 1]?.date;
   const activities = [...new Set(sessions.map((s) => s.activity))].join(', ');
 
+  // Layout note: the frame fills the page via flexGrow (NOT height:'100%', which
+  // combined with heavy padding used to crush every element into an overlapping
+  // stack). `justifyContent: center` vertically centres the content block, and the
+  // paddings are sized so the whole certificate fits one landscape page cleanly.
   const styles = StyleSheet.create({
-    page: { padding: 60, fontFamily: 'Helvetica' },
-    border: { border: '3px solid #1a1a1a', padding: 40, height: '100%' },
+    page: { padding: 26, fontFamily: 'Helvetica' },
+    border: { border: '3px solid #1a1a1a', flexGrow: 1, padding: 9 },
     inner: {
-      border: '1px solid #999', padding: 32,
-      height: '100%', alignItems: 'center',
+      border: '1px solid #999',
+      flexGrow: 1,
+      paddingVertical: 22,
+      paddingHorizontal: 46,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     orgName: {
-      fontSize: 13, fontFamily: 'Helvetica-Bold',
+      fontSize: 12, fontFamily: 'Helvetica-Bold',
       color: '#666', letterSpacing: 3,
-      textTransform: 'uppercase', marginBottom: 8, textAlign: 'center',
+      textTransform: 'uppercase', marginBottom: 6, textAlign: 'center',
     },
     certTitle: {
-      fontSize: 32, fontFamily: 'Helvetica-Bold',
-      marginBottom: 8, color: '#1a1a1a', textAlign: 'center',
+      fontSize: 30, fontFamily: 'Helvetica-Bold',
+      marginBottom: 4, color: '#1a1a1a', textAlign: 'center',
     },
-    certSubtitle: { fontSize: 12, color: '#666', marginBottom: 32, textAlign: 'center' },
+    certSubtitle: { fontSize: 11, color: '#666', marginBottom: 14, textAlign: 'center' },
     volunteerName: {
-      fontSize: 28, fontFamily: 'Helvetica-Bold',
-      color: '#1a1a1a', marginBottom: 8, textAlign: 'center',
+      fontSize: 26, fontFamily: 'Helvetica-Bold',
+      color: '#1a1a1a', marginBottom: 4, textAlign: 'center',
     },
-    divider: { width: 80, height: 2, backgroundColor: '#1a1a1a', marginVertical: 16 },
+    divider: { width: 80, height: 2, backgroundColor: '#1a1a1a', marginVertical: 10 },
     bodyText: {
-      fontSize: 11, color: '#333', textAlign: 'center',
-      lineHeight: 1.6, maxWidth: 380, marginBottom: 8,
+      fontSize: 10.5, color: '#333', textAlign: 'center',
+      lineHeight: 1.5, maxWidth: 430, marginBottom: 3,
     },
     customMessage: {
-      fontSize: 11, color: '#444', textAlign: 'center',
-      lineHeight: 1.6, maxWidth: 400, marginTop: 8,
+      fontSize: 10.5, color: '#444', textAlign: 'center',
+      lineHeight: 1.5, maxWidth: 430, marginTop: 6,
       fontFamily: 'Helvetica-Oblique',
     },
-    hoursBox: { backgroundColor: '#1a1a1a', borderRadius: 8, padding: '12 24', marginVertical: 20 },
-    hoursText: { fontSize: 36, fontFamily: 'Helvetica-Bold', color: '#fff', textAlign: 'center' },
-    hoursLabel: { fontSize: 10, color: '#ccc', textAlign: 'center', letterSpacing: 2 },
-    sigRow: { flexDirection: 'row', width: '100%', marginTop: 40, justifyContent: 'space-between' },
+    hoursBox: {
+      backgroundColor: '#1a1a1a', borderRadius: 8,
+      paddingVertical: 8, paddingHorizontal: 24,
+      marginVertical: 12, alignItems: 'center',
+    },
+    hoursText: { fontSize: 26, fontFamily: 'Helvetica-Bold', color: '#fff', textAlign: 'center' },
+    hoursLabel: { fontSize: 9, color: '#ccc', textAlign: 'center', letterSpacing: 2, marginTop: 2 },
+    sigRow: { flexDirection: 'row', width: '100%', marginTop: 26, justifyContent: 'space-between' },
     sigBox: { alignItems: 'center', width: '45%' },
+    sigImage: { height: 32, marginBottom: 2, objectFit: 'contain' },
     sigLine: { width: '100%', height: 1, backgroundColor: '#1a1a1a', marginBottom: 6 },
     sigName: { fontSize: 10, fontFamily: 'Helvetica-Bold', textAlign: 'center' },
     sigLabel: { fontSize: 9, color: '#666', textAlign: 'center' },
     footer: {
-      marginTop: 24, flexDirection: 'row',
+      marginTop: 18, flexDirection: 'row',
       justifyContent: 'space-between', width: '100%',
     },
     footerText: { fontSize: 8, color: '#999' },
@@ -464,6 +483,9 @@ export async function generateVolunteerCertificate(params: {
               React.createElement(
                 View,
                 { style: styles.sigBox },
+                signatureDataUrl
+                  ? React.createElement(Image, { style: styles.sigImage, src: signatureDataUrl })
+                  : null,
                 React.createElement(View, { style: styles.sigLine }),
                 React.createElement(
                   Text,

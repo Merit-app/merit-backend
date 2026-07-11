@@ -46,6 +46,8 @@ app.use('/organizations/:orgId/logo', express.json({ limit: '10mb' }));
 // Assignment submissions carry base64 file attachments — allow a larger body
 // (the service caps total + per-file size with clean 4xx errors below this).
 app.use('/my-chapter/assignments/:assignmentId/submit', express.json({ limit: '50mb' }));
+// Certificate generation can carry an optional base64 signature image.
+app.use('/org/:orgId/certificates', express.json({ limit: '10mb' }));
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
