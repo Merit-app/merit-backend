@@ -140,6 +140,80 @@ export async function createSession(userId: string, input: CreateSessionInput, u
     return session;
   }
 
+  // ── Org-verified path ─────────────────────────────────────────────────────
+  // The student logged at an org that's on Merit; an org admin approves it in-app.
+  // No supervisor contact, no SMS/email — the organization IS the authenticator.
+  // The row sits `pending` in the org's queue (supervisor_phone/email both null is
+  // the marker that distinguishes it from a supervisor-pending row).
+  if (input.orgVerified) {
+    const orgId = input.orgId;
+    if (!orgId) {
+      throw new AppError('org_required', 'Organization verification requires an existing organization.', 400);
+    }
+
+    // The org must be claimed (have at least one admin) — otherwise nobody can
+    // ever approve the session and the hours would be stuck pending forever.
+    const { data: adminRows, error: adminErr } = await supabaseAdmin
+      .from('org_admins')
+      .select('user_id')
+      .eq('org_id', orgId)
+      .limit(1);
+    if (adminErr) {
+      logger.error({ adminErr, orgId }, 'org_verify_admin_lookup_failed');
+      throw new AppError('org_verify_failed', 'Could not verify the organization.', 500);
+    }
+    if (!adminRows || adminRows.length === 0) {
+      throw new AppError(
+        'org_not_claimed',
+        "This organization isn't set up to verify hours yet. Add a supervisor contact instead.",
+        400,
+      );
+    }
+
+    // Double-submit guard (same 15s window as the other paths).
+    const dup = await findRecentDuplicate(userId, orgId, input.date, input.hours);
+    if (dup) {
+      logger.info({ sessionId: dup.id, userId }, 'org_verified_session_deduped');
+      return dup;
+    }
+
+    const { score: fraudScore, flags: fraudFlags } = await calculateFraudScore({
+      user_id: userId,
+      org_id: orgId,
+      date: input.date,
+      hours: input.hours,
+    });
+
+    const { data: session, error } = await supabaseAdmin
+      .from('sessions')
+      .insert({
+        user_id: userId,
+        org_id: orgId,
+        date: input.date,
+        hours: input.hours,
+        activity: sanitizeText(input.activity),
+        supervisor_name: '',
+        supervisor_phone: null,
+        supervisor_email: null,
+        authenticator_id: null,
+        status: 'pending',
+        self_reported: false,
+        fraud_score: fraudScore,
+        fraud_flags: fraudFlags,
+      })
+      .select('*, org:organizations(id, name), authenticator:authenticators(id, name, tier)')
+      .single();
+
+    if (error || !session) {
+      logger.error({ error, userId }, 'org_verified_session_create_failed');
+      throw new AppError('create_failed', 'Failed to create session.', 500);
+    }
+
+    trackEvent(userId, 'session_created', { orgId, hours: input.hours, orgVerified: true });
+    logger.info({ sessionId: session.id, userId, orgId }, 'org_verified_session_created');
+    return session;
+  }
+
   // ── Normal (verified) path ────────────────────────────────────────────────
 
   // 1. Normalize contact info

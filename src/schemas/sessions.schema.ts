@@ -17,6 +17,11 @@ export const createSessionSchema = z.object({
   supervisorPhone: z.string().optional().nullable(),
   supervisorEmail: z.string().email().optional().nullable(),
   selfReported: z.boolean().default(false),
+  // When true, the organization itself verifies the hours in-app — no supervisor
+  // contact, no SMS/email. The session sits `pending` in the org's queue until an
+  // admin approves it. Requires an EXISTING, claimed org (orgId, not newOrg) that
+  // has at least one admin to approve — the "has an admin" check is in the service.
+  orgVerified: z.boolean().default(false),
   // When true, log the verified session but DON'T text the supervisor yet — it
   // sits as "Not sent yet" until the student sends it (individually or in a batch).
   // Supervisor name + a contact are still required so the deferred send is one tap.
@@ -24,11 +29,14 @@ export const createSessionSchema = z.object({
   trackerNote: z.string().max(200).optional(),
 }).refine((d) => d.orgId || d.newOrg, {
   message: 'Must provide orgId or newOrg',
-}).refine((d) => d.selfReported || d.supervisorName, {
+}).refine((d) => d.selfReported || d.orgVerified || d.supervisorName, {
   message: 'Must provide supervisor name',
   path: ['supervisorName'],
-}).refine((d) => d.selfReported || d.supervisorPhone || d.supervisorEmail, {
+}).refine((d) => d.selfReported || d.orgVerified || d.supervisorPhone || d.supervisorEmail, {
   message: 'Must provide supervisorPhone or supervisorEmail',
+}).refine((d) => !d.orgVerified || !!d.orgId, {
+  message: 'Organization verification requires selecting an existing organization',
+  path: ['orgVerified'],
 });
 
 export const updateSessionSchema = z.object({

@@ -14,7 +14,7 @@ export async function searchOrganizations(q: string, limit = 10) {
   // 1. Search local cache first (trigram + full-text)
   const { data: cached } = await supabaseAdmin
     .from('organizations')
-    .select('id, name, ein, city, state, category, website, is_registered_nonprofit, is_institutional_partner, internal_trust_score')
+    .select('id, name, ein, city, state, category, website, is_registered_nonprofit, is_institutional_partner, internal_trust_score, claimed')
     .ilike('name', `%${q}%`)
     .order('internal_trust_score', { ascending: false })
     .limit(limit);
@@ -639,7 +639,7 @@ export async function getOrgVolunteers(orgId: string, userId: string) {
 
   const { data: sessions, error: sessErr } = await supabaseAdmin
     .from('sessions')
-    .select('id, date, hours, status, activity, user_id')
+    .select('id, date, hours, status, activity, user_id, supervisor_name, supervisor_phone, supervisor_email')
     .eq('org_id', orgId)
     .is('deleted_at', null)
     .order('date', { ascending: false });
@@ -1007,6 +1007,9 @@ function shapeOrgResult(org: any) {
     isRegisteredNonprofit: org.is_registered_nonprofit,
     isInstitutionalPartner: org.is_institutional_partner,
     trustScore: org.internal_trust_score,
+    // Claimed orgs (have at least one admin) can verify hours in-app themselves.
+    // Remote/ProPublica results are never claimed, so this is false for them.
+    claimed: org.claimed ?? false,
     source: org.source ?? 'cache',
   };
 }
